@@ -16,7 +16,7 @@ export const auth = betterAuth({
   plugins: [
     anonymous(),
     siwn({
-      domain: process.env.DOMAIN || "localhost:3000",
+      recipient: process.env.DOMAIN || "localhost:3000",
       getNonce: async () => {
         return generateNonce();
       },

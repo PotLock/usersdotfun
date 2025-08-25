@@ -112,15 +112,14 @@
     },
     "packages/core-sdk": {
       "name": "@usersdotfun/core-sdk",
-      "dependencies": {
-        "effect": "^3.17.6",
+      "devDependencies": {
+        "effect": "^3.17.7",
+        "typescript": "^5.0.0",
         "zod": "^4.0.8",
       },
-      "devDependencies": {
-        "@types/bun": "latest",
-      },
       "peerDependencies": {
-        "typescript": "^5.0.0",
+        "effect": ">=3.17.0 <4.0.0",
+        "zod": ">=4.0.0",
       },
     },
     "packages/pipeline-runner": {

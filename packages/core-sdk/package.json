@@ -9,14 +9,13 @@
   "scripts": {
     "build": "tsc -b"
   },
-  "devDependencies": {
-    "@types/bun": "latest"
-  },
   "peerDependencies": {
-    "typescript": "^5.0.0"
+    "effect": ">=3.17.0 <4.0.0",
+    "zod": ">=4.0.0"
   },
-  "dependencies": {
+  "devDependencies": {
+    "effect": "^3.17.7",
     "zod": "^4.0.8",
-    "effect": "^3.17.6"
+    "typescript": "^5.0.0"
   }
 }

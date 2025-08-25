@@ -53,19 +53,6 @@ function LoginForm() {
           contractId: "social.near",
         },
         {
-          onPending: (context: any) => {
-            switch (context.step) {
-              case "popup_opening":
-                toast.info("Opening wallet popup...");
-                break;
-              case "waiting_for_user":
-                toast.info("Please complete authentication in the popup");
-                break;
-              case "processing_result":
-                toast.info("Processing authentication result...");
-                break;
-            }
-          },
           onSuccess: (result: any) => {
             toast.success(`Wallet connected: ${result.accountId}`);
             setNearLoading(false);
@@ -92,7 +79,7 @@ function LoginForm() {
   const handleNearSignIn = async () => {
     setNearLoading(true);
 
-    const response = await authClient.signIn.near(
+    await authClient.signIn.near(
       {
         recipient: window.location.origin,
         signer: window.near,
