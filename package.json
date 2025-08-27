@@ -1,20 +1,17 @@
 {
   "name": "usersdotfun",
-  "module": "index.ts",
-  "type": "module",
   "private": true,
-  "devDependencies": {
-    "@types/bun": "latest"
-  },
-  "peerDependencies": {
-    "typescript": "^5"
-  },
+  "workspaces": [
+    "packages/**",
+    "plugins/**",
+    "apps/**"
+  ],
   "scripts": {
     "init": "sh scripts/init-dev.sh",
     "build:packages": "bun run --filter \"./packages/*\" build",
     "build:apps": "bun run --filter \"./apps/*\" build",
-    "build": "bun run build:packages && bun run build:apps",
-    "dev": "bun run --filter \"./apps/*\" dev",
+    "build": "turbo build",
+    "dev": "turbo dev --filter=./apps/*",
     "build:sdk": "bun run --filter @usersdotfun/core-sdk build",
     "build:registry": "bun run build:sdk && bun run packages/registry-builder/generate-registry.ts",
     "dev:plugins": "bun run --filter \"./plugins/*\" dev",
@@ -26,11 +23,16 @@
     "docker:build:gateway": "docker build -f apps/gateway/Dockerfile -t usersdotfun-gateway .",
     "docker:build:job-scheduler": "docker build -f apps/job-scheduler/Dockerfile -t usersdotfun-job-scheduler .",
     "docker:build:shared-db": "docker build -f packages/shared-db/Dockerfile -t usersdotfun-shared-db .",
-    "docker:build:shared-db:dev": "docker build -f packages/shared-db/Dockerfile.dev -t usersdotfun-shared-db:dev ."
+    "docker:build:shared-db:dev": "docker build -f packages/shared-db/Dockerfile.dev -t usersdotfun-shared-db:dev .",
+    "db:push": "turbo -F server db:push",
+    "db:studio": "turbo -F server db:studio",
+    "db:generate": "turbo -F server db:generate",
+    "db:migrate": "turbo -F server db:migrate"
   },
-  "workspaces": [
-    "packages/**",
-    "plugins/**",
-    "apps/**"
-  ]
+  "dependencies": {},
+  "devDependencies": {
+    "turbo": "^2.5.4",
+    "@types/bun": "latest"
+  },
+  "packageManager": "bun@1.2.19"
 }

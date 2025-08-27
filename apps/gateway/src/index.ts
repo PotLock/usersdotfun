@@ -6,7 +6,7 @@ import { logger } from 'hono/logger'
 import { auth } from './lib/auth'
 import { createContext } from './lib/context'
 import { appRouter } from './routers'
-import websocketRoutes, { websocket } from './routes/websocket'
+// import websocketRoutes, { websocket } from './routes/websocket'
 
 const app = new Hono();
 
@@ -48,7 +48,7 @@ app.get("/", (c) => {
   return c.text("OK");
 });
 
-app.route('/api/ws', websocketRoutes);
+// app.route('/api/ws', websocketRoutes);
 
 const port = parseInt(process.env.PORT || '3001')
 console.log(`Gateway running on port ${port}`)
@@ -56,5 +56,5 @@ console.log(`Gateway running on port ${port}`)
 export default {
   port,
   fetch: app.fetch,
-  websocket,
+  // websocket,
 }
