@@ -7,6 +7,9 @@
   },
   "dependencies": {
     "@hono/zod-validator": "^0.7.2",
+    "@orpc/openapi": "^1.8.5",
+    "@orpc/server": "^1.8.5",
+    "@orpc/zod": "^1.8.5",
     "@usersdotfun/shared-db": "workspace:*",
     "@usersdotfun/shared-queue": "workspace:*",
     "@usersdotfun/shared-types": "workspace:*",

@@ -4,18 +4,36 @@ import { Activity, ArrowRight, ListTodo, Workflow } from "lucide-react";
 import { Badge } from "~/components/ui/badge";
 import { Button } from "~/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "~/components/ui/card";
-import { allQueueJobsQueryOptions, workflowsQueryOptions } from "~/lib/queries";
+import { orpc } from "~/utils/orpc";
 
 export const Route = createFileRoute("/_layout/")({
   component: Dashboard,
+  loader: async ({ context }) => {
+    // Preload data using oRPC
+    const [workflows, recentJobs] = await Promise.all([
+      context.queryClient.ensureQueryData(
+        orpc.workflows.getAll.queryOptions()
+      ),
+      context.queryClient.ensureQueryData(
+        orpc.queues.getAllJobs.queryOptions()
+      ),
+    ]);
+
+    return { workflows, recentJobs };
+  },
 });
 
 function Dashboard() {
-  const { data: workflows, isLoading: workflowsLoading } = useQuery(
-    workflowsQueryOptions
-  );
+  const { workflows: initialWorkflows, recentJobs: initialRecentJobs } = Route.useLoaderData();
+  
+  const { data: workflows, isLoading: workflowsLoading } = useQuery({
+    ...orpc.workflows.getAll.queryOptions(),
+    initialData: initialWorkflows,
+  });
+  
   const { data: recentJobs, isLoading: jobsLoading } = useQuery({
-    ...allQueueJobsQueryOptions({ limit: 10 }),
+    ...orpc.queues.getAllJobs.queryOptions(),
+    initialData: initialRecentJobs,
   });
 
   return (
@@ -45,7 +63,7 @@ function Dashboard() {
               <div className="text-sm text-muted-foreground">
                 {workflowsLoading
                   ? "Loading..."
-                  : `${workflows?.length || 0} workflows`}
+                  : `${workflows?.data?.length || 0} workflows`}
               </div>
               <Button asChild variant="ghost" size="sm">
                 <Link to="/workflows">
@@ -71,7 +89,7 @@ function Dashboard() {
               <div className="text-sm text-muted-foreground">
                 {jobsLoading
                   ? "Loading..."
-                  : `${recentJobs?.items?.length || 0} recent jobs`}
+                  : `${recentJobs?.data?.items?.length || 0} recent jobs`}
               </div>
               <Button asChild variant="ghost" size="sm">
                 <Link to="/queues">
@@ -101,13 +119,13 @@ function Dashboard() {
               <div className="text-center py-8 text-muted-foreground">
                 Loading recent activity...
               </div>
-            ) : !recentJobs?.items?.length ? (
+            ) : !recentJobs?.data?.items?.length ? (
               <div className="text-center py-8 text-muted-foreground">
                 No recent activity found
               </div>
             ) : (
               <div className="space-y-3">
-                {recentJobs.items.slice(0, 5).map((job) => (
+                {recentJobs.data.items.slice(0, 5).map((job: any) => (
                   <div
                     key={job.id}
                     className="flex items-center justify-between py-2 border-b last:border-0"

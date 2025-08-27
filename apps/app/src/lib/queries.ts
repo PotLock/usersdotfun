@@ -9,7 +9,7 @@ import {
   GetWorkflowRunsResponseSchema,
   GetWorkflowsResponseSchema
 } from "@usersdotfun/shared-types/schemas";
-import { callApi } from "./api.server";
+import { orpc } from "~/utils/orpc";
 
 function extractData<T extends { data?: any }>(
   promise: Promise<T>
@@ -44,99 +44,43 @@ export const queryKeys = {
 } as const;
 
 // --- Workflow Queries ---
-export const workflowsQueryOptions = {
-  queryKey: queryKeys.workflows.all(),
-  queryFn: () =>
-    extractData(
-      callApi({ data: { path: "/workflows", method: "GET" } }).then((data) =>
-        GetWorkflowsResponseSchema.parse(data)
-      )
-    ),
-};
+export const workflowsQueryOptions = orpc.workflows.list.queryOptions();
 
 export const useWorkflowsQuery = () => useQuery(workflowsQueryOptions);
 
-export const workflowQueryOptions = (workflowId: string) => ({
-  queryKey: queryKeys.workflows.detail(workflowId),
-  queryFn: () =>
-    extractData(
-      callApi({
-        data: { path: `/workflows/${workflowId}`, method: "GET" },
-      }).then((data) => GetWorkflowResponseSchema.parse(data))
-    ),
-  enabled: !!workflowId,
-});
+export const workflowQueryOptions = (workflowId: string) => 
+  orpc.workflows.get.queryOptions({ input: { id: workflowId } });
 
 export const useWorkflowQuery = (workflowId: string) =>
   useQuery(workflowQueryOptions(workflowId));
 
 // --- Run Queries ---
-export const workflowRunsQueryOptions = (workflowId: string) => ({
-  queryKey: queryKeys.workflows.runs(workflowId),
-  queryFn: () =>
-    extractData(
-      callApi({
-        data: { path: `/workflows/${workflowId}/runs`, method: "GET" },
-      }).then((data) => GetWorkflowRunsResponseSchema.parse(data))
-    ),
-  enabled: !!workflowId,
-});
+export const workflowRunsQueryOptions = (workflowId: string) => 
+  orpc.workflows.runs.queryOptions({ input: { id: workflowId } });
 
 export const useWorkflowRunsQuery = (workflowId: string) =>
   useQuery(workflowRunsQueryOptions(workflowId));
 
-export const runDetailsQueryOptions = (runId: string) => ({
-  queryKey: queryKeys.runs.detail(runId),
-  queryFn: () =>
-    extractData(
-      callApi({
-        data: { path: `/runs/${runId}/details`, method: "GET" },
-      }).then((data) => GetWorkflowRunResponseSchema.parse(data))
-    ),
-  enabled: !!runId,
-});
+export const runDetailsQueryOptions = (runId: string) => 
+  orpc.runs.details.queryOptions({ input: { runId } });
 
 export const useRunDetailsQuery = (runId: string) =>
   useQuery(runDetailsQueryOptions(runId));
 
 // --- Item Queries ---
-export const workflowItemsQueryOptions = (workflowId: string) => ({
-  queryKey: queryKeys.workflows.items(workflowId),
-  queryFn: () =>
-    extractData(
-      callApi({
-        data: { path: `/workflows/${workflowId}/items`, method: "GET" },
-      }).then((data) => GetWorkflowItemsResponseSchema.parse(data))
-    ),
-  enabled: !!workflowId,
-});
+export const workflowItemsQueryOptions = (workflowId: string) => 
+  orpc.workflows.items.queryOptions({ input: { id: workflowId } });
 
 export const useWorkflowItemsQuery = (workflowId: string) =>
   useQuery(workflowItemsQueryOptions(workflowId));
 
 // --- Queue Queries ---
-export const queuesStatusQueryOptions = {
-  queryKey: queryKeys.queues.all(),
-  queryFn: () =>
-    extractData(
-      callApi({ data: { path: "/queues", method: "GET" } }).then((data) =>
-        GetQueuesStatusResponseSchema.parse(data)
-      )
-    ),
-};
+export const queuesStatusQueryOptions = orpc.queues.status.queryOptions();
 
 export const useQueuesStatusQuery = () => useQuery(queuesStatusQueryOptions);
 
-export const queueDetailsQueryOptions = (queueName: string) => ({
-  queryKey: queryKeys.queues.detail(queueName),
-  queryFn: () =>
-    extractData(
-      callApi({
-        data: { path: `/queues/${queueName}/jobs?status=all`, method: "GET" },
-      }).then((data) => GetQueueJobsResponseSchema.parse(data))
-    ),
-  enabled: !!queueName,
-});
+export const queueDetailsQueryOptions = (queueName: string) => 
+  orpc.queues.jobs.queryOptions({ input: { queueName, status: "all" } });
 
 export const useQueueDetailsQuery = (queueName: string) =>
   useQuery(queueDetailsQueryOptions(queueName));
@@ -145,20 +89,7 @@ export const allQueueJobsQueryOptions = (filters?: {
   status?: string;
   queueName?: string;
   limit?: number;
-}) => ({
-  queryKey: queryKeys.queues.jobs(filters?.queueName),
-  queryFn: () => {
-    const params = new URLSearchParams();
-    if (filters?.status) params.set("status", filters.status);
-    if (filters?.queueName) params.set("queueName", filters.queueName);
-    if (filters?.limit) params.set("limit", filters.limit.toString());
-    return extractData(
-      callApi({
-        data: { path: `/queues/jobs?${params.toString()}`, method: "GET" },
-      }).then((data) => GetAllQueueJobsResponseSchema.parse(data))
-    );
-  },
-});
+}) => orpc.queues.allJobs.queryOptions({ input: filters });
 
 export const useAllQueueJobsQuery = (filters?: {
   status?: string;
@@ -169,36 +100,18 @@ export const useAllQueueJobsQuery = (filters?: {
 // --- Mutations ---
 export const useCreateWorkflowMutation = () => {
   const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: (newWorkflowData: any) =>
-      extractData(
-        callApi({
-          data: {
-            path: "/workflows",
-            method: "POST",
-            body: newWorkflowData,
-          },
-        })
-      ),
+  return useMutation(orpc.workflows.create.mutationOptions({
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: queryKeys.workflows.all() });
     },
-  });
+  }));
 };
 
 export const useUpdateWorkflowMutation = () => {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: ({ id, workflow }: { id: string; workflow: any }) =>
-      extractData(
-        callApi({
-          data: {
-            path: `/workflows/${id}`,
-            method: "PUT",
-            body: workflow,
-          },
-        })
-      ),
+      orpc.workflows.update.call({ id, ...workflow }),
     onSuccess: (_, { id }) => {
       queryClient.invalidateQueries({ queryKey: queryKeys.workflows.all() });
       queryClient.invalidateQueries({
@@ -211,8 +124,7 @@ export const useUpdateWorkflowMutation = () => {
 export const useDeleteWorkflowMutation = () => {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (id: string) =>
-      callApi({ data: { path: `/workflows/${id}`, method: "DELETE" } }),
+    mutationFn: (id: string) => orpc.workflows.delete.call({ id }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: queryKeys.workflows.all() });
     },
@@ -222,12 +134,7 @@ export const useDeleteWorkflowMutation = () => {
 export const useToggleWorkflowStatusMutation = () => {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (id: string) =>
-      extractData(
-        callApi({
-          data: { path: `/workflows/${id}/toggle`, method: "POST" },
-        })
-      ),
+    mutationFn: (id: string) => orpc.workflows.toggle.call({ id }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: queryKeys.workflows.all() });
     },
@@ -237,10 +144,7 @@ export const useToggleWorkflowStatusMutation = () => {
 export const useRunWorkflowNowMutation = () => {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (id: string) =>
-      extractData(
-        callApi({ data: { path: `/workflows/${id}/run`, method: "POST" } })
-      ),
+    mutationFn: (id: string) => orpc.workflows.run.call({ id }),
     onSuccess: (_, workflowId) => {
       queryClient.invalidateQueries({
         queryKey: queryKeys.workflows.runs(workflowId),
@@ -252,13 +156,7 @@ export const useRunWorkflowNowMutation = () => {
 export const useCancelWorkflowRunMutation = () => {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (runId: string) =>
-      callApi({
-        data: {
-          path: `/runs/${runId}/cancel`,
-          method: "POST",
-        },
-      }),
+    mutationFn: (runId: string) => orpc.runs.cancel.call({ runId }),
     onSuccess: (_data, runId) => {
       queryClient.invalidateQueries({
         queryKey: queryKeys.runs.detail(runId),
@@ -270,13 +168,7 @@ export const useCancelWorkflowRunMutation = () => {
 export const useDeleteWorkflowRunMutation = () => {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (runId: string) =>
-      callApi({
-        data: {
-          path: `/runs/${runId}`,
-          method: "DELETE",
-        },
-      }),
+    mutationFn: (runId: string) => orpc.runs.delete.call({ runId }),
     onSuccess: (_data, runId) => {
       queryClient.invalidateQueries({
         queryKey: queryKeys.runs.detail(runId),

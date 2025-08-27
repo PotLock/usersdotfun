@@ -3,8 +3,8 @@ import {
   PluginLoggerTag,
   ConfigurationError,
   PluginExecutionError,
+  Effect
 } from '@usersdotfun/core-sdk';
-import { Effect } from 'effect';
 import { Client } from '@notionhq/client';
 import {
   NotionDistributorConfig,

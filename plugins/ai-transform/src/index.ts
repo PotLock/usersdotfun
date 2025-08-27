@@ -3,8 +3,8 @@ import {
   PluginLoggerTag,
   ConfigurationError,
   PluginExecutionError,
+  Effect
 } from '@usersdotfun/core-sdk';
-import { Effect } from 'effect';
 import {
   AITransformerConfig,
   AITransformerConfigSchema,
@@ -153,7 +153,7 @@ export default class AITransformer
             },
             body: JSON.stringify(requestBody),
           }),
-          catch: (error) => new PluginExecutionError(
+          catch: (error: unknown) => new PluginExecutionError(
             `Network error calling OpenRouter API: ${error instanceof Error ? error.message : 'Unknown error'}`,
             true
           ),
@@ -173,7 +173,7 @@ export default class AITransformer
 
         const result = yield* Effect.tryPromise({
           try: () => response.json() as Promise<OpenRouterResponse>,
-          catch: (error) => new PluginExecutionError(
+          catch: (error: unknown) => new PluginExecutionError(
             `Failed to parse OpenRouter API response: ${error instanceof Error ? error.message : 'Unknown error'}`,
             false
           ),

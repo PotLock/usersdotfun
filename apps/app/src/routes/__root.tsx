@@ -15,6 +15,7 @@ import { DefaultCatchBoundary } from "~/components/default-catch-boundary";
 import { NotFound } from "~/components/not-found";
 import { Toaster } from "~/components/ui/sonner";
 import { auth } from "~/lib/auth";
+import { orpc } from "~/utils/orpc";
 import { WebSocketProvider } from "~/lib/websocket";
 import appCss from "~/styles/app.css?url";
 import { seo } from "~/utils/seo";
@@ -29,10 +30,13 @@ const getUser = createServerFn({ method: "GET" }).handler(async () => {
   }
 });
 
-export const Route = createRootRouteWithContext<{
+export interface RouterAppContext {
+  orpc: typeof orpc;
   queryClient: QueryClient;
-  user: Awaited<ReturnType<typeof getUser>>;
-}>()({
+  user: Awaited<ReturnType<typeof getUser>>
+}
+
+export const Route = createRootRouteWithContext<RouterAppContext>()({
   beforeLoad: async ({ context }) => {
     const user = await context.queryClient.fetchQuery({
       queryKey: ["user"],

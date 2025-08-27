@@ -1,32 +1,26 @@
+import { RPCHandler } from "@orpc/server/fetch"
 import { Hono } from 'hono'
 import { rateLimiter } from 'hono-rate-limiter'
 import { cors } from 'hono/cors'
 import { logger } from 'hono/logger'
-import { authMiddleware } from './middleware/auth'
-import { queuesRouter } from './routes/queues'
+import { auth } from './lib/auth'
+import { createContext } from './lib/context'
+import { appRouter } from './routers'
 import websocketRoutes, { websocket } from './routes/websocket'
-import { workflowsRouter } from './routes/workflows'
-import { runsRouter } from './routes/runs'
-import { itemsRouter } from './routes/items'
-import './types/hono'
-import type { AppType } from './types/hono'
 
-const app = new Hono<AppType>()
+const app = new Hono();
 
-// Global middleware stack
 app.use('*', logger())
-
 app.use('*', cors({
-  origin: [
-    'http://localhost:3000',
-    process.env.APP_URL || 'https://yourapp.com'
-  ],
-  credentials: true,
+  origin: process.env.CORS_ORIGIN || "*",
+  allowMethods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowHeaders: ['Content-Type', 'Authorization', 'Cookie'],
-  allowMethods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS']
-}))
+  credentials: true,
+}));
 
-app.use('*', authMiddleware);
+app.on(["POST", "GET"], "/api/auth/**", (c) => auth.handler(c.req.raw));
+
+// app.use('*', authMiddleware);
 app.use('*', rateLimiter({
   windowMs: 15 * 60 * 1000, // 15 mins
   limit: 100,
@@ -36,13 +30,25 @@ app.use('*', rateLimiter({
   }
 }));
 
-// Routes
-app.get('/', (c) => c.text('Gateway API'))
-app.route('/api/workflows', workflowsRouter)
-app.route('/api/runs', runsRouter)
-app.route('/api/items', itemsRouter)
-app.route('/api/queues', queuesRouter)
-app.route('/api/ws', websocketRoutes)
+const handler = new RPCHandler(appRouter);
+app.use("/rpc/*", async (c, next) => {
+  const context = await createContext({ context: c });
+  const { matched, response } = await handler.handle(c.req.raw, {
+    prefix: "/rpc",
+    context: context,
+  });
+
+  if (matched) {
+    return c.newResponse(response.body, response);
+  }
+  await next();
+});
+
+app.get("/", (c) => {
+  return c.text("OK");
+});
+
+app.route('/api/ws', websocketRoutes);
 
 const port = parseInt(process.env.PORT || '3001')
 console.log(`Gateway running on port ${port}`)

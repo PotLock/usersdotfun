@@ -11,7 +11,8 @@ import { db } from "~/db";
 export const auth = betterAuth({
   database: drizzleAdapter(db, {
     provider: "pg",
-    schema: schema,
+    schema: schema, // does this really need to hook into the gateway db? No. It can maintain it's own sessions
+    // TODO: SQLite solution
   }),
   plugins: [
     anonymous({
@@ -47,11 +48,11 @@ export const auth = betterAuth({
       maxAge: 5 * 60 // 5 minutes cache
     }
   },
-  advanced: {
-    defaultCookieAttributes: {
-      sameSite: "none",
-      secure: true,
-      partitioned: true
-    }
-  }
+  // advanced: {
+  //   defaultCookieAttributes: {
+  //     sameSite: "none",
+  //     secure: true,
+  //     partitioned: true
+  //   }
+  // }
 });

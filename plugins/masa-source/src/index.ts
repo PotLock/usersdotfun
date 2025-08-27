@@ -5,8 +5,8 @@ import {
   PluginExecutionError,
   ContentType,
   type LastProcessedState,
+  Effect
 } from '@usersdotfun/core-sdk';
-import { Effect } from 'effect';
 import { MasaClient } from './masa-client';
 import {
   MasaSourceConfig,

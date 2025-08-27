@@ -1,7 +1,8 @@
 {
   "include": [
     "**/*.ts",
-    "**/*.tsx"
+    "**/*.tsx",
+    "../gateway/src/routers/index.ts"
   ],
   "compilerOptions": {
     "strict": true,

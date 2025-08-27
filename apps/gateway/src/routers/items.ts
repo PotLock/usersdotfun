@@ -1,22 +1,16 @@
-import { zValidator } from '@hono/zod-validator';
 import { WorkflowService } from '@usersdotfun/shared-db';
 import { QueueService } from '@usersdotfun/shared-queue';
 import { QUEUE_NAMES } from '@usersdotfun/shared-types/types';
 import { Effect } from 'effect';
-import { Hono } from 'hono';
 import { z } from 'zod';
-import { requireAdmin, requireAuth } from '../middleware/auth';
+import { authenticatedProcedure, adminProcedure } from '../lib/orpc';
 import { AppRuntime } from '../runtime';
-import type { AppType } from '../types/hono';
-import { honoErrorHandler } from '../utils/error-handlers';
 
-export const itemsRouter = new Hono<AppType>()
-  // Get all plugin runs for an item across all workflows
-  .get('/:itemId/plugin-runs', 
-    zValidator('param', z.object({ itemId: z.string() })),
-    requireAuth, 
-    async (c) => {
-      const { itemId } = c.req.valid('param');
+export const itemRouter = {
+  getPluginRuns: authenticatedProcedure
+    .input(z.object({ itemId: z.string() }))
+    .handler(async ({ input }) => {
+      const { itemId } = input;
 
       const program = Effect.gen(function* () {
         const workflowService = yield* WorkflowService;
@@ -24,20 +18,14 @@ export const itemsRouter = new Hono<AppType>()
         return { success: true, data: pluginRuns };
       });
 
-      try {
-        const result = await AppRuntime.runPromise(program);
-        return c.json(result);
-      } catch (err) {
-        return honoErrorHandler(c, err);
-      }
-    })
+      const result = await AppRuntime.runPromise(program);
+      return result;
+    }),
 
-  // Get all workflow runs an item has been part of
-  .get('/:itemId/workflow-runs', 
-    zValidator('param', z.object({ itemId: z.string() })),
-    requireAuth, 
-    async (c) => {
-      const { itemId } = c.req.valid('param');
+  getWorkflowRuns: authenticatedProcedure
+    .input(z.object({ itemId: z.string() }))
+    .handler(async ({ input }) => {
+      const { itemId } = input;
 
       const program = Effect.gen(function* () {
         const workflowService = yield* WorkflowService;
@@ -45,29 +33,22 @@ export const itemsRouter = new Hono<AppType>()
         return { success: true, data: workflowRuns };
       });
 
-      try {
-        const result = await AppRuntime.runPromise(program);
-        return c.json(result);
-      } catch (err) {
-        return honoErrorHandler(c, err);
-      }
-    })
+      const result = await AppRuntime.runPromise(program);
+      return result;
+    }),
     
-  // Retry a specific plugin run
-  .post('/:itemId/plugin-runs/:pluginRunId/retry',
-    zValidator('param', z.object({ 
+  retryPluginRun: adminProcedure
+    .input(z.object({ 
       itemId: z.string(), 
       pluginRunId: z.string() 
-    })),
-    requireAdmin,
-    async (c) => {
-      const { itemId, pluginRunId } = c.req.valid('param');
+    }))
+    .handler(async ({ input }) => {
+      const { itemId, pluginRunId } = input;
 
       const program = Effect.gen(function* () {
         const workflowService = yield* WorkflowService;
         const queueService = yield* QueueService;
         
-        // Get the plugin run details to understand what to retry
         const pluginRun = yield* workflowService.updatePluginRun(pluginRunId, {
           status: 'PENDING',
           error: null,
@@ -75,17 +56,15 @@ export const itemsRouter = new Hono<AppType>()
           completedAt: null,
         });
         
-        // Get the workflow run to get the workflow ID
         const workflowRun = yield* workflowService.getWorkflowRunById(pluginRun.workflowRunId);
         
-        // Re-enqueue to the PIPELINE_EXECUTION queue
         yield* queueService.add(QUEUE_NAMES.PIPELINE_EXECUTION, `retry-from-step-${pluginRun.stepId}`, {
           workflowId: workflowRun.workflowId,
           workflowRunId: pluginRun.workflowRunId,
           data: {
             sourceItemId: itemId,
             input: pluginRun.input as Record<string, unknown>,
-            startAtStepId: pluginRun.stepId, // Start from this specific step
+            startAtStepId: pluginRun.stepId,
           }
         });
 
@@ -97,10 +76,7 @@ export const itemsRouter = new Hono<AppType>()
         };
       });
 
-      try {
-        const result = await AppRuntime.runPromise(program);
-        return c.json(result);
-      } catch (err) {
-        return honoErrorHandler(c, err);
-      }
-    });
+      const result = await AppRuntime.runPromise(program);
+      return result;
+    })
+};
