@@ -1,15 +1,16 @@
-import { useQuery } from "@tanstack/react-query";
+import { useLiveQuery } from "@tanstack/react-db";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { Activity, ArrowRight, ListTodo, Workflow } from "lucide-react";
 import { Badge } from "~/components/ui/badge";
 import { Button } from "~/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "~/components/ui/card";
+import { workflowsCollection, queueJobsCollection } from "~/db/collections";
 import { orpc } from "~/utils/orpc";
 
 export const Route = createFileRoute("/_layout/")({
   component: Dashboard,
   loader: async ({ context }) => {
-    // Preload data using oRPC
+    // Preload data using orpc for initial load, collections will take over
     const [workflows, recentJobs] = await Promise.all([
       context.queryClient.ensureQueryData(
         orpc.workflows.getAll.queryOptions()
@@ -24,17 +25,21 @@ export const Route = createFileRoute("/_layout/")({
 });
 
 function Dashboard() {
-  const { workflows: initialWorkflows, recentJobs: initialRecentJobs } = Route.useLoaderData();
+  // Live queries that automatically update when data changes
+  const { data: workflows } = useLiveQuery((q) =>
+    q.from({ workflow: workflowsCollection })
+  );
   
-  const { data: workflows, isLoading: workflowsLoading } = useQuery({
-    ...orpc.workflows.getAll.queryOptions(),
-    initialData: initialWorkflows,
-  });
-  
-  const { data: recentJobs, isLoading: jobsLoading } = useQuery({
-    ...orpc.queues.getAllJobs.queryOptions(),
-    initialData: initialRecentJobs,
-  });
+  const { data: recentJobs } = useLiveQuery((q) =>
+    q.from({ job: queueJobsCollection })
+     .orderBy(({ job }) => job.timestamp, 'desc')
+  );
+
+  const workflowsLoading = false; // Live queries don't have loading states
+  const jobsLoading = false;
+
+  // Get only the first 5 recent jobs for display
+  const displayJobs = recentJobs?.slice(0, 5);
 
   return (
     <div className="container mx-auto px-4 py-8 space-y-8">
@@ -63,7 +68,7 @@ function Dashboard() {
               <div className="text-sm text-muted-foreground">
                 {workflowsLoading
                   ? "Loading..."
-                  : `${workflows?.data?.length || 0} workflows`}
+                  : `${workflows?.length || 0} workflows`}
               </div>
               <Button asChild variant="ghost" size="sm">
                 <Link to="/workflows">
@@ -89,7 +94,7 @@ function Dashboard() {
               <div className="text-sm text-muted-foreground">
                 {jobsLoading
                   ? "Loading..."
-                  : `${recentJobs?.data?.items?.length || 0} recent jobs`}
+                  : `${displayJobs?.length || 0} recent jobs`}
               </div>
               <Button asChild variant="ghost" size="sm">
                 <Link to="/queues">
@@ -119,13 +124,13 @@ function Dashboard() {
               <div className="text-center py-8 text-muted-foreground">
                 Loading recent activity...
               </div>
-            ) : !recentJobs?.data?.items?.length ? (
+            ) : !displayJobs?.length ? (
               <div className="text-center py-8 text-muted-foreground">
                 No recent activity found
               </div>
             ) : (
               <div className="space-y-3">
-                {recentJobs.data.items.slice(0, 5).map((job: any) => (
+                {displayJobs.map((job: any) => (
                   <div
                     key={job.id}
                     className="flex items-center justify-between py-2 border-b last:border-0"

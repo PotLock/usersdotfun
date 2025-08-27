@@ -10,17 +10,20 @@ import type { SourceItem } from "@usersdotfun/shared-types/types";
 import { useState } from "react";
 import { DataTable } from "~/components/common/data-table";
 import { Button } from "~/components/ui/button";
-import {
-  workflowItemsQueryOptions,
-  workflowQueryOptions,
-} from "~/lib/queries";
+import { createWorkflowItemsCollection } from "~/db/collections";
+import { useLiveQuery } from "@tanstack/react-db";
+import { orpc } from "~/utils/orpc";
 
 export const Route = createFileRoute("/_layout/workflows/$workflowId/items")({
   component: WorkflowItemsPage,
   loader: async ({ params: { workflowId }, context: { queryClient } }) => {
     const [items, workflow] = await Promise.all([
-      queryClient.ensureQueryData(workflowItemsQueryOptions(workflowId)),
-      queryClient.ensureQueryData(workflowQueryOptions(workflowId)),
+      queryClient.ensureQueryData(
+        orpc.workflows.getItems.queryOptions({ input: { id: workflowId } })
+      ),
+      queryClient.ensureQueryData(
+        orpc.workflows.getById.queryOptions({ input: { id: workflowId } })
+      ),
     ]);
     return { workflow, items };
   },
@@ -95,15 +98,24 @@ const columns: ColumnDef<SourceItem>[] = [
 ];
 
 function WorkflowItemsPage() {
-  const { workflow, items } = useLoaderData({
+  const { workflow: initialWorkflow } = useLoaderData({
     from: "/_layout/workflows/$workflowId/items",
   });
+  const { workflowId } = useParams({
+    from: "/_layout/workflows/$workflowId/items",
+  });
+
+  // Live query for workflow items that automatically updates
+  const { data: items } = useLiveQuery((q) =>
+    q.from({ item: createWorkflowItemsCollection(workflowId) })
+     .orderBy(({ item }) => item.createdAt, 'desc')
+  );
 
   return (
     <div className="container mx-auto p-4 sm:p-6 lg:p-8">
       <div className="mb-6">
         <h1 className="text-3xl font-bold tracking-tight">
-          Workflow Items: {workflow?.name}
+          Workflow Items: {initialWorkflow?.data?.name}
         </h1>
         <p className="text-muted-foreground">
           View and inspect the items processed by your workflow.

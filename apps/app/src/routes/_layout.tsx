@@ -13,6 +13,9 @@ export const Route = createFileRoute("/_layout")({
         },
       });
     }
+    return {
+      user: context.user,
+    };
   },
 });
 

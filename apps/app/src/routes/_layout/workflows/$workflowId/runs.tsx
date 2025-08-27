@@ -10,22 +10,20 @@ import type { WorkflowRun } from "@usersdotfun/shared-types/types";
 import { DataTable } from "~/components/common/data-table";
 import { Badge } from "~/components/ui/badge";
 import { Button } from "~/components/ui/button";
-import {
-  useCancelWorkflowRunMutation,
-  useDeleteWorkflowRunMutation,
-  workflowQueryOptions,
-  workflowRunsQueryOptions,
-} from "~/lib/queries";
+import { createWorkflowRunsCollection } from "~/db/collections";
 import { workflowRunStatusColors } from "~/lib/status-colors";
+import { useLiveQuery } from "@tanstack/react-db";
+import { orpc } from "~/utils/orpc";
+import { toast } from "sonner";
 
 export const Route = createFileRoute("/_layout/workflows/$workflowId/runs")({
   component: WorkflowRunsPage,
   loader: async ({ params: { workflowId }, context: { queryClient } }) => {
     const workflow = await queryClient.ensureQueryData(
-      workflowQueryOptions(workflowId)
+      orpc.workflows.getById.queryOptions({ input: { id: workflowId } })
     );
     const runs = await queryClient.ensureQueryData(
-      workflowRunsQueryOptions(workflowId)
+      orpc.workflows.getRuns.queryOptions({ input: { id: workflowId } })
     );
     return { workflow, runs };
   },
@@ -77,11 +75,25 @@ const columns: ColumnDef<WorkflowRun>[] = [
     id: "actions",
     cell: function Cell({ row }) {
       const run = row.original;
-      const stopMutation = useCancelWorkflowRunMutation();
-      const deleteMutation = useDeleteWorkflowRunMutation();
+      const { workflowId } = useParams({
+        from: "/_layout/workflows/$workflowId/runs",
+      });
 
-      const onCancel = () => stopMutation.mutate(run.id);
-      const onDelete = () => deleteMutation.mutate(run.id);
+      const onCancel = () => {
+        // Optimistic update - change status immediately
+        const runsCollection = createWorkflowRunsCollection(workflowId);
+        runsCollection.update(run.id, (draft) => {
+          draft.status = 'CANCELLED';
+        });
+        toast.success("Run cancelled");
+      };
+
+      const onDelete = () => {
+        // Optimistic deletion - remove from UI immediately
+        const runsCollection = createWorkflowRunsCollection(workflowId);
+        runsCollection.delete(run.id);
+        toast.success("Run deleted");
+      };
 
       return (
         <div className="flex gap-2">
@@ -102,15 +114,24 @@ const columns: ColumnDef<WorkflowRun>[] = [
 ];
 
 function WorkflowRunsPage() {
-  const { workflow, runs } = useLoaderData({
+  const { workflow } = useLoaderData({
     from: "/_layout/workflows/$workflowId/runs",
   });
+  const { workflowId } = useParams({
+    from: "/_layout/workflows/$workflowId/runs",
+  });
+
+  // Live query for workflow runs that automatically updates
+  const { data: runs } = useLiveQuery((q) =>
+    q.from({ run: createWorkflowRunsCollection(workflowId) })
+     .orderBy(({ run }) => run.startedAt, 'desc')
+  );
 
   return (
     <div className="container mx-auto p-4 sm:p-6 lg:p-8">
       <div className="mb-6">
         <h1 className="text-3xl font-bold tracking-tight">
-          Workflow Runs: {workflow?.name}
+          Workflow Runs: {workflow?.data?.name}
         </h1>
         <p className="text-muted-foreground">
           View and inspect the execution history of your workflow.

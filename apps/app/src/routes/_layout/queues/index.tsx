@@ -26,16 +26,10 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "~/components/ui/dropdown-menu";
-import {
-  allQueueJobsQueryOptions,
-  queuesStatusQueryOptions,
-  useClearQueueMutation,
-  usePauseQueueMutation,
-  useRemoveQueueJobMutation,
-  useResumeQueueMutation
-} from "~/lib/queries";
+import { queueStatusCollection, queueJobsCollection } from "~/db/collections";
 import { cn } from "~/lib/utils";
-import { useQuery } from "@tanstack/react-query";
+import { useLiveQuery, eq } from "@tanstack/react-db";
+import { orpc } from "~/utils/orpc";
 
 export const Route = createFileRoute("/_layout/queues/")({
   component: QueuesPage,
@@ -43,8 +37,12 @@ export const Route = createFileRoute("/_layout/queues/")({
     queueName: z.string().optional(),
   }),
   loader: async ({ context: { queryClient } }) => {
-    const queuesStatus = await queryClient.ensureQueryData(queuesStatusQueryOptions);
-    const jobs = await queryClient.ensureQueryData(allQueueJobsQueryOptions());
+    const queuesStatus = await queryClient.ensureQueryData(
+      orpc.queues.getAll.queryOptions()
+    );
+    const jobs = await queryClient.ensureQueryData(
+      orpc.queues.getAllJobs.queryOptions()
+    );
     return { queuesStatus, jobs };
   },
 });
@@ -205,23 +203,31 @@ function QueueStatusCard({
 function QueuesPage() {
   const { queueName: selectedQueue } = Route.useSearch();
   const navigate = useNavigate({ from: Route.fullPath });
-  const { queuesStatus: initialQueuesStatus, jobs: initialJobs } =
-    Route.useLoaderData();
 
-  const { data: queuesStatus, isLoading: isLoadingStatus } = useQuery({
-    ...queuesStatusQueryOptions,
-    initialData: initialQueuesStatus,
-  });
-  const { data: jobs, isLoading: isLoadingJobs } = useQuery({
-    ...allQueueJobsQueryOptions({ queueName: selectedQueue }),
-    initialData: initialJobs,
-  });
+  // Live queries that automatically update when data changes
+  const { data: queuesStatus } = useLiveQuery((q) =>
+    q.from({ queue: queueStatusCollection })
+  );
+  
+  const { data: allJobs } = useLiveQuery((q) =>
+    q.from({ job: queueJobsCollection })
+     .orderBy(({ job }) => job.timestamp, 'desc')
+  );
+
+  // Filter jobs by selected queue if specified
+  const { data: jobs } = useLiveQuery((q) =>
+    selectedQueue
+      ? q.from({ job: queueJobsCollection })
+         .where(({ job }) => eq(job.queueName, selectedQueue))
+         .orderBy(({ job }) => job.timestamp, 'desc')
+      : q.from({ job: queueJobsCollection })
+         .orderBy(({ job }) => job.timestamp, 'desc')
+  );
+
   const [rowSelection, setRowSelection] = useState({});
   const [isDeleteDialogOpen, setDeleteDialogOpen] = useState(false);
-  const deleteMutation = useRemoveQueueJobMutation();
-  const pauseMutation = usePauseQueueMutation();
-  const resumeMutation = useResumeQueueMutation();
-  const clearMutation = useClearQueueMutation();
+  const isLoadingStatus = false;
+  const isLoadingJobs = false;
 
   const handleQueueSelect = (queueName: string) => {
     navigate({
@@ -235,32 +241,43 @@ function QueuesPage() {
   const handleDelete = async () => {
     const idsToDelete = Object.keys(rowSelection);
     if (!selectedQueue) return;
-    toast.promise(
-      Promise.all(
-        idsToDelete.map((id) =>
-          deleteMutation.mutateAsync({ queueName: selectedQueue, jobId: id })
-        )
-      ),
-      {
-        loading: "Deleting jobs...",
-        success: "Jobs deleted successfully!",
-        error: "Failed to delete jobs.",
-      }
-    );
+    
+    // Optimistic deletion - remove jobs from UI immediately
+    idsToDelete.forEach((id) => {
+      queueJobsCollection.delete(id);
+    });
+    
+    toast.success("Jobs deleted successfully!");
     setRowSelection({});
     setDeleteDialogOpen(false);
   };
 
   const handleClear = async () => {
     if (!selectedQueue) return;
-    toast.promise(
-      clearMutation.mutateAsync({ queueName: selectedQueue, jobType: "all" }),
-      {
-        loading: "Clearing queue...",
-        success: "Queue cleared successfully!",
-        error: "Failed to clear queue.",
-      }
-    );
+    
+    // Optimistic clear - remove all jobs for this queue
+    const jobsToDelete = jobs?.filter(job => job.queueName === selectedQueue) || [];
+    jobsToDelete.forEach((job) => {
+      queueJobsCollection.delete(job.id);
+    });
+    
+    toast.success("Queue cleared successfully!");
+  };
+
+  const handlePauseQueue = (queueName: string) => {
+    // Optimistic update - pause queue immediately
+    queueStatusCollection.update(queueName, (draft) => {
+      draft.paused = true;
+    });
+    toast.success(`Queue ${queueName} paused`);
+  };
+
+  const handleResumeQueue = (queueName: string) => {
+    // Optimistic update - resume queue immediately
+    queueStatusCollection.update(queueName, (draft) => {
+      draft.paused = false;
+    });
+    toast.success(`Queue ${queueName} resumed`);
   };
 
   return (
@@ -296,12 +313,8 @@ function QueuesPage() {
                 <>
                   <Button
                     onClick={() => {
-                      const promises = queuesStatus?.map((q) => resumeMutation.mutateAsync(q.name));
-                      toast.promise(Promise.all(promises || []), {
-                        loading: "Resuming all queues...",
-                        success: "All queues resumed!",
-                        error: "Failed to resume all queues.",
-                      });
+                      queuesStatus?.forEach((q) => handleResumeQueue(q.name));
+                      toast.success("All queues resumed!");
                     }}
                   >
                     <Play className="mr-2 h-4 w-4" />
@@ -309,12 +322,8 @@ function QueuesPage() {
                   </Button>
                   <Button
                     onClick={() => {
-                      const promises = queuesStatus?.map((q) => pauseMutation.mutateAsync(q.name));
-                      toast.promise(Promise.all(promises || []), {
-                        loading: "Pausing all queues...",
-                        success: "All queues paused!",
-                        error: "Failed to pause all queues.",
-                      });
+                      queuesStatus?.forEach((q) => handlePauseQueue(q.name));
+                      toast.success("All queues paused!");
                     }}
                   >
                     <Pause className="mr-2 h-4 w-4" />
@@ -323,12 +332,11 @@ function QueuesPage() {
                   <Button
                     variant="outline"
                     onClick={() => {
-                      const promises = queuesStatus?.map((q) => clearMutation.mutateAsync({ queueName: q.name, jobType: "all" }));
-                      toast.promise(Promise.all(promises || []), {
-                        loading: "Clearing all queues...",
-                        success: "All queues cleared!",
-                        error: "Failed to clear all queues.",
+                      // Clear all jobs from all queues
+                      allJobs?.forEach((job) => {
+                        queueJobsCollection.delete(job.id);
                       });
+                      toast.success("All queues cleared!");
                     }}
                   >
                     <XCircle className="mr-2 h-4 w-4" />
@@ -349,14 +357,14 @@ function QueuesPage() {
                   {queuesStatus?.find((q) => q.name === selectedQueue)
                     ?.paused ? (
                     <Button
-                      onClick={() => resumeMutation.mutateAsync(selectedQueue)}
+                      onClick={() => handleResumeQueue(selectedQueue)}
                     >
                       <Play className="mr-2 h-4 w-4" />
                       Resume
                     </Button>
                   ) : (
                     <Button
-                      onClick={() => pauseMutation.mutateAsync(selectedQueue)}
+                      onClick={() => handlePauseQueue(selectedQueue)}
                     >
                       <Pause className="mr-2 h-4 w-4" />
                       Pause
@@ -372,7 +380,7 @@ function QueuesPage() {
           </div>
           <DataTable
             columns={columns}
-            data={jobs?.items || []}
+            data={jobs || []}
             isLoading={isLoadingJobs}
             filterColumnId="id"
             filterPlaceholder="Filter by Job ID..."

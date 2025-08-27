@@ -10,43 +10,50 @@ import { toast } from "sonner";
 import { JsonEditor } from "~/components/common/json-editor";
 import { Button } from "~/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "~/components/ui/tabs";
-import { useUpdateWorkflowMutation, workflowQueryOptions } from "~/lib/queries";
+import { workflowsCollection } from "~/db/collections";
+import { orpc } from "~/utils/orpc";
 
 export const Route = createFileRoute("/_layout/workflows/$workflowId/edit")({
   loader: ({ params: { workflowId }, context: { queryClient } }) =>
-    queryClient.ensureQueryData(workflowQueryOptions(workflowId)),
+    queryClient.ensureQueryData(
+      orpc.workflows.getById.queryOptions({ input: { id: workflowId } })
+    ),
   component: EditWorkflowPage,
 });
 
 function EditWorkflowPage() {
   const workflow = useLoaderData({ from: Route.id });
 
-  if (!workflow) {
+  if (!workflow?.data) {
     return null;
   }
 
-  return <WorkflowEdit workflow={workflow} />;
+  return <WorkflowEdit workflow={workflow.data} />;
 }
 
 function WorkflowEdit({ workflow }: { workflow: UpdateWorkflowData }) {
   const { workflowId } = Route.useParams();
-  const updateMutation = useUpdateWorkflowMutation();
   const navigate = useNavigate();
 
-  const handleSuccess = () => {
+  const onSubmit = (data: any) => {
+    if (!data) {
+      toast.error("Please provide workflow data");
+      return;
+    }
+
+    // Optimistic update - changes appear immediately in UI
+    workflowsCollection.update(workflowId, (draft) => {
+      Object.assign(draft, {
+        name: data.name || draft.name,
+        source: data.source,
+        pipeline: data.pipeline,
+        schedule: data.schedule !== undefined ? data.schedule : draft.schedule,
+        status: data.status || draft.status,
+      });
+    });
+
     toast.success("Workflow updated successfully!");
     navigate({ to: "/workflows/$workflowId", params: { workflowId } });
-  };
-
-  const handleError = (error: Error) => {
-    toast.error(`Failed to update workflow: ${error.message}`);
-  };
-
-  const onSubmit = (data: UpdateWorkflowData) => {
-    updateMutation.mutate(
-      { id: workflowId, workflow: data },
-      { onSuccess: handleSuccess, onError: handleError }
-    );
   };
 
   return (

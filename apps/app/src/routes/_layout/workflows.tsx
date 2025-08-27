@@ -1,3 +1,4 @@
+import { useLiveQuery } from "@tanstack/react-db";
 import {
   createFileRoute,
   Link,
@@ -37,17 +38,12 @@ import {
   SidebarProvider,
   SidebarTrigger,
 } from "~/components/ui/sidebar";
-import { Skeleton } from "~/components/ui/skeleton";
 import {
   Tooltip,
   TooltipContent,
   TooltipTrigger,
 } from "~/components/ui/tooltip";
-import {
-  useRunWorkflowNowMutation,
-  useToggleWorkflowStatusMutation,
-  useWorkflowsQuery,
-} from "~/lib/queries";
+import { createWorkflowRunsCollection, workflowsCollection } from "~/db/collections";
 import { workflowStatusColors } from "~/lib/status-colors";
 
 export const Route = createFileRoute("/_layout/workflows")({
@@ -57,11 +53,15 @@ export const Route = createFileRoute("/_layout/workflows")({
 function WorkflowsLayout() {
   const params = useParams({ strict: false });
   const navigate = useNavigate();
-  const { data: workflows, isLoading } = useWorkflowsQuery();
-  const runMutation = useRunWorkflowNowMutation();
-  const toggleMutation = useToggleWorkflowStatusMutation();
+  const { user } = Route.useRouteContext();
   const router = useRouterState();
   const currentPath = router.location.pathname;
+
+  // Live query for workflows that automatically updates
+  const { data: workflows } = useLiveQuery((q) =>
+    q.from({ workflow: workflowsCollection })
+     .orderBy(({ workflow }) => workflow.createdAt, 'desc')
+  );
 
   // Extract workflowId from any nested route
   const workflowId = (params as any).workflowId;
@@ -69,28 +69,40 @@ function WorkflowsLayout() {
   const handleRunNow = async (workflowId: string, e: React.MouseEvent) => {
     e.stopPropagation();
     e.preventDefault();
-    const promise = runMutation.mutateAsync(workflowId);
-    toast.promise(promise, {
-      loading: "Triggering workflow...",
-      success: (data) => {
-        navigate({
-          to: "/workflows/$workflowId/runs/$runId",
-          params: { workflowId, runId: data.id },
-        });
-        return "Workflow triggered successfully!";
-      },
-      error: "Failed to trigger workflow.",
+    
+    // Create optimistic run entry
+    const runsCollection = createWorkflowRunsCollection(workflowId);
+    
+    const newWorkflow = runsCollection.insert({
+      id: "...",
+      workflowId,
+      status: 'PENDING',
+      startedAt: new Date(),
+      completedAt: null,
+      failureReason: null,
+      itemsProcessed: 0,
+      itemsTotal: 0,
+      triggeredBy: user.id,
+      user: user
+    });
+
+    toast.success("Workflow triggered successfully!");
+    navigate({
+      to: "/workflows/$workflowId/runs/$runId",
+      params: { workflowId, runId: newWorkflow.id },
     });
   };
 
   const handleToggle = async (workflowId: string, e: React.MouseEvent) => {
     e.stopPropagation();
     e.preventDefault();
-    toast.promise(toggleMutation.mutateAsync(workflowId), {
-      loading: "Toggling status...",
-      success: "Status toggled successfully!",
-      error: "Failed to toggle status.",
+    
+    // Optimistic mutation - UI updates instantly
+    workflowsCollection.update(workflowId, (draft) => {
+      draft.status = draft.status === 'ACTIVE' ? 'INACTIVE' : 'ACTIVE';
     });
+    
+    toast.success("Status toggled successfully!");
   };
 
   return (
@@ -129,19 +141,7 @@ function WorkflowsLayout() {
               </SidebarGroupLabel>
               <SidebarGroupContent>
                 <SidebarMenu>
-                  {isLoading ? (
-                    <>
-                      <SidebarMenuItem>
-                        <Skeleton className="h-10 w-full" />
-                      </SidebarMenuItem>
-                      <SidebarMenuItem>
-                        <Skeleton className="h-10 w-full" />
-                      </SidebarMenuItem>
-                      <SidebarMenuItem>
-                        <Skeleton className="h-10 w-full" />
-                      </SidebarMenuItem>
-                    </>
-                  ) : workflows && workflows.length > 0 ? (
+                  {workflows && workflows.length > 0 ? (
                     workflows.map((workflow) => (
                       <SidebarMenuItem key={workflow.id}>
                         <Tooltip>

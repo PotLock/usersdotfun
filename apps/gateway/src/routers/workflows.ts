@@ -1,43 +1,11 @@
 import { WorkflowService } from '@usersdotfun/shared-db';
 import { QueueService, StateService } from '@usersdotfun/shared-queue';
 import { QUEUE_NAMES } from '@usersdotfun/shared-types/types';
+import { createWorkflowSchema, updateWorkflowSchema } from '@usersdotfun/shared-types/schemas/workflows';
 import { Effect } from 'effect';
 import { z } from 'zod';
 import { adminProcedure, authenticatedProcedure } from '../lib/orpc';
 import { AppRuntime } from '../runtime';
-
-const workflowStatusEnum = z.enum(["ACTIVE", "INACTIVE", "ARCHIVED"]);
-
-const pluginConfigSchema = z.object({
-  pluginId: z.string().min(1, "Plugin ID cannot be empty"),
-  config: z.any(),
-});
-
-const pipelineStepDefinitionSchema = pluginConfigSchema.extend({
-  stepId: z.string().min(1, "Step ID cannot be empty"),
-});
-
-const sourceSchema = pluginConfigSchema.extend({
-  search: z.any()
-});
-
-const pipelineSchema = z.object({
-  steps: z.array(pipelineStepDefinitionSchema),
-  env: z.object({
-    secrets: z.array(z.string()),
-  }).optional(),
-});
-
-const createWorkflowSchema = z.object({
-  name: z.string(),
-  status: workflowStatusEnum.default("INACTIVE"),
-  schedule: z.string().optional().nullable(),
-  source: sourceSchema,
-  pipeline: pipelineSchema,
-  state: z.any().optional().nullable(),
-});
-
-const updateWorkflowSchema = createWorkflowSchema.partial();
 
 const idParamSchema = z.object({
   id: z.string().min(1),
@@ -55,6 +23,21 @@ export const workflowRouter = {
     return result;
   }),
 
+  getById: authenticatedProcedure
+    .input(idParamSchema)
+    .handler(async ({ input }) => {
+      const { id } = input;
+
+      const program = Effect.gen(function* () {
+        const workflowService = yield* WorkflowService;
+        const workflow = yield* workflowService.getWorkflowById(id);
+        return { success: true, data: workflow };
+      });
+
+      const result = await AppRuntime.runPromise(program);
+      return result;
+    }),
+
   create: adminProcedure
     .input(createWorkflowSchema)
     .handler(async ({ input, context }) => {
@@ -71,21 +54,6 @@ export const workflowRouter = {
         });
 
         return { success: true, data: newWorkflow };
-      });
-
-      const result = await AppRuntime.runPromise(program);
-      return result;
-    }),
-
-  getById: authenticatedProcedure
-    .input(idParamSchema)
-    .handler(async ({ input }) => {
-      const { id } = input;
-
-      const program = Effect.gen(function* () {
-        const workflowService = yield* WorkflowService;
-        const workflow = yield* workflowService.getWorkflowById(id);
-        return { success: true, data: workflow };
       });
 
       const result = await AppRuntime.runPromise(program);

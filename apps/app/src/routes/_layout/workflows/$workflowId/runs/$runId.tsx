@@ -4,19 +4,18 @@ import {
   useLoaderData,
   useNavigate,
 } from "@tanstack/react-router";
-import { useQuery } from "@tanstack/react-query";
+import { useLiveQuery } from "@tanstack/react-db";
 import { AlertCircle, Loader2, RotateCcw } from "lucide-react";
 import { CommonSheet } from "~/components/common/common-sheet";
 import { Alert, AlertDescription, AlertTitle } from "~/components/ui/alert";
 import { Badge } from "~/components/ui/badge";
 import { Button } from "~/components/ui/button";
 import {
-  useDeleteWorkflowRunMutation,
-  useCancelWorkflowRunMutation,
-  useRetryPluginRunMutation,
-  workflowRunPluginRunsQueryOptions,
-  workflowRunItemsQueryOptions,
-} from "~/lib/queries";
+  createRunDetailsCollection,
+  createPluginRunsCollection,
+  createRunItemsCollection,
+  createWorkflowRunsCollection,
+} from "~/db/collections";
 import {
   Tabs,
   TabsContent,
@@ -24,11 +23,7 @@ import {
   TabsTrigger,
 } from "~/components/ui/tabs";
 import { CodePreview } from "~/components/common/code-preview";
-import {
-  runDetailsQueryOptions,
-  workflowQueryOptions,
-  workflowRunsQueryOptions,
-} from "~/lib/queries";
+import { orpc } from "~/utils/orpc";
 import {
   pluginRunStatusColors,
   workflowRunStatusColors,
@@ -45,9 +40,15 @@ export const Route = createFileRoute(
     context: { queryClient },
   }) => {
     const [runDetails] = await Promise.all([
-      queryClient.ensureQueryData(runDetailsQueryOptions(runId)),
-      queryClient.ensureQueryData(workflowQueryOptions(workflowId)),
-      queryClient.ensureQueryData(workflowRunsQueryOptions(workflowId)),
+      queryClient.ensureQueryData(
+        orpc.runs.getDetails.queryOptions({ input: { runId } })
+      ),
+      queryClient.ensureQueryData(
+        orpc.workflows.getById.queryOptions({ input: { id: workflowId } })
+      ),
+      queryClient.ensureQueryData(
+        orpc.workflows.getRuns.queryOptions({ input: { id: workflowId } })
+      ),
     ]);
     return { runDetails };
   },
@@ -88,51 +89,71 @@ export const Route = createFileRoute(
 
 function RunDetailsPage() {
   const navigate = useNavigate({ from: Route.fullPath });
-  const { runDetails } = useLoaderData({ from: Route.id });
-  const stopMutation = useCancelWorkflowRunMutation();
-  const deleteMutation = useDeleteWorkflowRunMutation();
-  const retryMutation = useRetryPluginRunMutation();
+  const { runDetails: initialRunDetails } = useLoaderData({ from: Route.id });
+  const runId = initialRunDetails?.data?.id || '';
+  const workflowId = initialRunDetails?.data?.workflowId || '';
 
-  // Query for source plugin runs (separate from pipeline runs)
-  const { data: sourcePluginRuns, isLoading: sourceLoading } = useQuery(
-    workflowRunPluginRunsQueryOptions(runDetails?.id || '', 'SOURCE')
+  // Live query for run details that automatically updates
+  const { data: runDetailsArray } = useLiveQuery((q) =>
+    q.from({ run: createRunDetailsCollection(runId) })
+  );
+  const runDetails = runDetailsArray?.[0]; // Single item wrapped in array
+
+  // Live queries for plugin runs and items
+  const { data: sourcePluginRuns } = useLiveQuery((q) =>
+    q.from({ pluginRun: createPluginRunsCollection(runId, 'SOURCE') })
   );
 
-  // Query for items processed in this run
-  const { data: runItems, isLoading: itemsLoading } = useQuery(
-    workflowRunItemsQueryOptions(runDetails?.id || '')
+  const { data: runItems } = useLiveQuery((q) =>
+    q.from({ item: createRunItemsCollection(runId) })
   );
 
-  // Query for pipeline plugin runs
-  const { data: pipelinePluginRuns, isLoading: pipelineLoading } = useQuery(
-    workflowRunPluginRunsQueryOptions(runDetails?.id || '', 'PIPELINE')
+  const { data: pipelinePluginRuns } = useLiveQuery((q) =>
+    q.from({ pluginRun: createPluginRunsCollection(runId, 'PIPELINE') })
   );
+
+  const sourceLoading = false;
+  const itemsLoading = false;
+  const pipelineLoading = false;
 
   const onCancel = () => {
     if (runDetails) {
-      stopMutation.mutate(runDetails.id, {
-        onSuccess: () => handleClose(),
+      // Optimistic update - change status immediately
+      const runsCollection = createWorkflowRunsCollection(workflowId);
+      runsCollection.update(runDetails.id, (draft) => {
+        draft.status = 'CANCELLED';
       });
+      
+      // Also update the run details collection
+      const runDetailsCollection = createRunDetailsCollection(runId);
+      runDetailsCollection.update(runDetails.id, (draft) => {
+        draft.status = 'CANCELLED';
+      });
+      
+      toast.success("Run cancelled");
+      handleClose();
     }
   };
 
   const onDelete = () => {
     if (runDetails) {
-      deleteMutation.mutate(runDetails.id, {
-        onSuccess: () => handleClose(),
-      });
+      // Optimistic deletion - remove from UI immediately
+      const runsCollection = createWorkflowRunsCollection(workflowId);
+      runsCollection.delete(runDetails.id);
+      
+      toast.success("Run deleted");
+      handleClose();
     }
   };
 
   const handleRetry = (itemId: string, pluginRunId: string) => {
-    retryMutation.mutate({ itemId, pluginRunId }, {
-      onSuccess: () => {
-        toast.success('Plugin run queued for retry');
-      },
-      onError: (error) => {
-        toast.error(`Failed to retry: ${error.message}`);
-      }
+    // Optimistic update - change plugin run status immediately
+    const pluginRunsCollection = createPluginRunsCollection(runId, 'PIPELINE');
+    pluginRunsCollection.update(pluginRunId, (draft) => {
+      draft.status = 'PENDING';
     });
+    
+    toast.success('Plugin run queued for retry');
   };
 
   if (!runDetails) {
@@ -239,9 +260,9 @@ function RunDetailsPage() {
               <h4 className="font-medium">Source Plugin Runs</h4>
               {sourceLoading ? (
                 <div className="text-center py-4">Loading source plugin runs...</div>
-              ) : sourcePluginRuns?.pluginRuns?.length ? (
+              ) : sourcePluginRuns?.length ? (
                 <div className="space-y-3">
-                  {sourcePluginRuns?.pluginRuns?.map((pluginRun: PluginRun) => (
+                  {sourcePluginRuns?.map((pluginRun: PluginRun) => (
                     <div key={pluginRun.id} className="border p-3 rounded-md">
                       <div className="flex justify-between items-center mb-2">
                         <p className="font-semibold text-sm">{pluginRun.stepId}</p>
@@ -331,9 +352,9 @@ function RunDetailsPage() {
               <h4 className="font-medium">Pipeline Plugin Runs</h4>
               {pipelineLoading ? (
                 <div className="text-center py-4">Loading pipeline plugin runs...</div>
-              ) : pipelinePluginRuns?.pluginRuns?.length ? (
+              ) : pipelinePluginRuns?.length ? (
                 <div className="space-y-3">
-                  {pipelinePluginRuns.pluginRuns?.map((pluginRun: PluginRun) => (
+                  {pipelinePluginRuns?.map((pluginRun: PluginRun) => (
                     <div key={pluginRun.id} className="border p-3 rounded-md">
                       <div className="flex justify-between items-center mb-2">
                         <div>
@@ -360,7 +381,6 @@ function RunDetailsPage() {
                               size="sm"
                               variant="outline"
                               onClick={() => handleRetry(pluginRun.sourceItemId!, pluginRun.id)}
-                              disabled={retryMutation.isPending}
                             >
                               <RotateCcw className="h-3 w-3 mr-1" />
                               Retry

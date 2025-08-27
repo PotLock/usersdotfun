@@ -1,14 +1,15 @@
-import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { CreateWorkflowData } from "@usersdotfun/shared-db/src/services";
 import {
-  createWorkflowSchema
-} from "@usersdotfun/shared-types/schemas";
+  createFileRoute,
+  useNavigate
+} from "@tanstack/react-router";
+import { createWorkflowSchema } from "@usersdotfun/shared-types/schemas";
 import { useState } from "react";
 import { toast } from "sonner";
+import { z } from "zod";
 import { JsonEditor } from "~/components/common/json-editor";
 import { Button } from "~/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "~/components/ui/tabs";
-import { useCreateWorkflowMutation } from "~/lib/queries";
+import { workflowsCollection } from "~/db/collections";
 
 export const Route = createFileRoute("/_layout/workflows/create")({
   component: CreateWorkflowPage,
@@ -19,23 +20,27 @@ function CreateWorkflowPage() {
 }
 
 function WorkflowCreate() {
-  const createMutation = useCreateWorkflowMutation();
   const navigate = useNavigate();
+  const { user } = Route.useRouteContext(); // TODO: we should know that user is active
 
-  const handleSuccess = () => {
+  const onSubmit = (data: z.infer<typeof createWorkflowSchema>) => {
+    if (!data || !data.name) {
+      toast.error("Please provide workflow data");
+      return;
+    }
+
+    const newWorkflow = {
+      id: "...",
+      createdBy: user.id,
+      user: user,
+      createdAt: new Date(),
+      ...data,
+    };
+
+    workflowsCollection.insert(newWorkflow);
+
     toast.success("Workflow created successfully!");
     navigate({ to: "/workflows" });
-  };
-
-  const handleError = (error: Error) => {
-    toast.error(`Failed to create workflow: ${error.message}`);
-  };
-
-  const onSubmit = (data: CreateWorkflowData) => {
-    createMutation.mutate(data, {
-      onSuccess: handleSuccess,
-      onError: handleError,
-    });
   };
 
   return (
@@ -50,9 +55,16 @@ function WorkflowCreate() {
   );
 }
 
-function JsonEditorWithAtom({ onSubmit }: { onSubmit: (data: any) => void }) {
-  const [editedWorkflow, setEditedWorkflow] =
-    useState<CreateWorkflowData | null>(null);
+function JsonEditorWithAtom({
+  onSubmit,
+}: {
+  onSubmit: (data: z.infer<typeof createWorkflowSchema>) => void;
+}) {
+  const [editedWorkflow, setEditedWorkflow] = useState<z.infer<
+    typeof createWorkflowSchema
+  > | null>(null);
+
+  createWorkflowSchema;
 
   return (
     <div>
@@ -62,7 +74,9 @@ function JsonEditorWithAtom({ onSubmit }: { onSubmit: (data: any) => void }) {
         schema={createWorkflowSchema}
       />
       <div className="flex justify-end mt-4">
-        <Button onClick={() => onSubmit(editedWorkflow)}>Save from JSON</Button>
+        <Button onClick={() => editedWorkflow && onSubmit(editedWorkflow)}>
+          Save from JSON
+        </Button>
       </div>
     </div>
   );
