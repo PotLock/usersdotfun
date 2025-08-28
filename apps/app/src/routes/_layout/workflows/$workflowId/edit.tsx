@@ -10,14 +10,11 @@ import { toast } from "sonner";
 import { JsonEditor } from "~/components/common/json-editor";
 import { Button } from "~/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "~/components/ui/tabs";
-import { workflowsCollection } from "~/db/collections";
-import { orpc } from "~/utils/orpc";
+import { useUpdateWorkflowMutation, workflowQueryOptions } from "~/lib/queries";
 
 export const Route = createFileRoute("/_layout/workflows/$workflowId/edit")({
   loader: ({ params: { workflowId }, context: { queryClient } }) =>
-    queryClient.ensureQueryData(
-      orpc.workflows.getById.queryOptions({ input: { id: workflowId } })
-    ),
+    queryClient.ensureQueryData(workflowQueryOptions(workflowId)),
   component: EditWorkflowPage,
 });
 
@@ -34,6 +31,7 @@ function EditWorkflowPage() {
 function WorkflowEdit({ workflow }: { workflow: UpdateWorkflowData }) {
   const { workflowId } = Route.useParams();
   const navigate = useNavigate();
+  const updateMutation = useUpdateWorkflowMutation();
 
   const onSubmit = (data: any) => {
     if (!data) {
@@ -41,19 +39,26 @@ function WorkflowEdit({ workflow }: { workflow: UpdateWorkflowData }) {
       return;
     }
 
-    // Optimistic update - changes appear immediately in UI
-    workflowsCollection.update(workflowId, (draft) => {
-      Object.assign(draft, {
-        name: data.name || draft.name,
-        source: data.source,
-        pipeline: data.pipeline,
-        schedule: data.schedule !== undefined ? data.schedule : draft.schedule,
-        status: data.status || draft.status,
-      });
-    });
+    const updateData = {
+      name: data.name || workflow.name,
+      source: data.source,
+      pipeline: data.pipeline,
+      schedule: data.schedule !== undefined ? data.schedule : workflow.schedule,
+      status: data.status || workflow.status,
+    };
 
-    toast.success("Workflow updated successfully!");
-    navigate({ to: "/workflows/$workflowId", params: { workflowId } });
+    updateMutation.mutate(
+      { id: workflowId, workflow: updateData },
+      {
+        onSuccess: () => {
+          toast.success("Workflow updated successfully!");
+          navigate({ to: "/workflows/$workflowId", params: { workflowId } });
+        },
+        onError: (error) => {
+          toast.error(`Failed to update workflow: ${error.message}`);
+        },
+      }
+    );
   };
 
   return (
@@ -75,9 +80,8 @@ function JsonEditorWithAtom({
   workflow: UpdateWorkflowData;
   onSubmit: (data: any) => void;
 }) {
-  const [editedWorkflow, setEditedWorkflow] = useState<UpdateWorkflowData | null>(
-    workflow
-  );
+  const [editedWorkflow, setEditedWorkflow] =
+    useState<UpdateWorkflowData | null>(workflow);
 
   useEffect(() => {
     setEditedWorkflow(updateWorkflowSchema.parse(workflow));

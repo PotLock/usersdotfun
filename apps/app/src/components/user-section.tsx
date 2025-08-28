@@ -32,13 +32,6 @@ export function UserSection() {
       </div>
       <Button
         onClick={async () => {
-          const profile = await authClient.near.getProfile();
-        }}
-      >
-        test
-      </Button>
-      <Button
-        onClick={async () => {
           setLoading(true);
           await authClient.signOut();
           await queryClient.invalidateQueries({ queryKey: ["user"] });

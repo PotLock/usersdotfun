@@ -2,7 +2,7 @@ import { createRouter as createTanStackRouter } from "@tanstack/react-router";
 import { DefaultCatchBoundary } from "./components/default-catch-boundary";
 import { NotFound } from "./components/not-found";
 import { routeTree } from "./routeTree.gen";
-import { queryClient } from "./utils/orpc";
+import { orpc, queryClient } from "./utils/orpc";
 import { QueryClientProvider } from "@tanstack/react-query";
 
 export const createRouter = () => {
@@ -10,7 +10,9 @@ export const createRouter = () => {
     routeTree,
     scrollRestoration: true,
     defaultPreload: "intent",
-    context: { orpc, queryClient },
+    context: { 
+      // orpc,
+      queryClient, user: null },
     defaultPendingComponent: () => <div>Loading...</div>,
     defaultNotFoundComponent: () => <NotFound />,
     defaultErrorComponent: DefaultCatchBoundary,

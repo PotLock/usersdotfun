@@ -10,20 +10,16 @@ import type { SourceItem } from "@usersdotfun/shared-types/types";
 import { useState } from "react";
 import { DataTable } from "~/components/common/data-table";
 import { Button } from "~/components/ui/button";
-import { createWorkflowItemsCollection } from "~/db/collections";
-import { useLiveQuery } from "@tanstack/react-db";
+import { workflowQueryOptions, workflowItemsQueryOptions } from "~/lib/queries";
+import { useQuery } from "@tanstack/react-query";
 import { orpc } from "~/utils/orpc";
 
 export const Route = createFileRoute("/_layout/workflows/$workflowId/items")({
   component: WorkflowItemsPage,
   loader: async ({ params: { workflowId }, context: { queryClient } }) => {
     const [items, workflow] = await Promise.all([
-      queryClient.ensureQueryData(
-        orpc.workflows.getItems.queryOptions({ input: { id: workflowId } })
-      ),
-      queryClient.ensureQueryData(
-        orpc.workflows.getById.queryOptions({ input: { id: workflowId } })
-      ),
+      queryClient.ensureQueryData(workflowItemsQueryOptions(workflowId)),
+      queryClient.ensureQueryData(workflowQueryOptions(workflowId)),
     ]);
     return { workflow, items };
   },
@@ -105,11 +101,9 @@ function WorkflowItemsPage() {
     from: "/_layout/workflows/$workflowId/items",
   });
 
-  // Live query for workflow items that automatically updates
-  const { data: items } = useLiveQuery((q) =>
-    q.from({ item: createWorkflowItemsCollection(workflowId) })
-     .orderBy(({ item }) => item.createdAt, 'desc')
-  );
+  // Query for workflow items that automatically updates
+  const { data: itemsResponse } = useQuery(workflowItemsQueryOptions(workflowId));
+  const items = itemsResponse?.data || [];
 
   return (
     <div className="container mx-auto p-4 sm:p-6 lg:p-8">

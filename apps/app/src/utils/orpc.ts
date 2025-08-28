@@ -4,6 +4,7 @@ import { createTanstackQueryUtils } from "@orpc/tanstack-query";
 import { QueryCache, QueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import type { AppRouterClient } from "../../../gateway/src/routers/index";
+import { getWebRequest } from "@tanstack/react-start/server";
 
 export const queryClient = new QueryClient({
 	queryCache: new QueryCache({
@@ -22,8 +23,19 @@ export const queryClient = new QueryClient({
 
 export const link = new RPCLink({
 	url: `${import.meta.env.VITE_SERVER_URL}/rpc`,
-	fetch(url, options) {
-		return fetch(url, {
+	fetch(req, options) {
+		const ctx = getWebRequest();
+		if (!ctx) {
+			throw new Error("Could not access the server request context.");
+		}
+
+		const cookie = ctx.headers.get("Cookie");
+		const headers = req.headers;
+		headers.set("Content-Type", "application/json");
+		if (cookie) {
+			headers.set("Cookie", cookie);
+		}
+		return fetch(req, {
 			...options,
 			credentials: "include",
 		});

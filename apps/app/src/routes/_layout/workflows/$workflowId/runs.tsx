@@ -10,9 +10,14 @@ import type { WorkflowRun } from "@usersdotfun/shared-types/types";
 import { DataTable } from "~/components/common/data-table";
 import { Badge } from "~/components/ui/badge";
 import { Button } from "~/components/ui/button";
-import { createWorkflowRunsCollection } from "~/db/collections";
+import { 
+  workflowQueryOptions,
+  workflowRunsQueryOptions,
+  useCancelWorkflowRunMutation,
+  useDeleteWorkflowRunMutation,
+} from "~/lib/queries";
 import { workflowRunStatusColors } from "~/lib/status-colors";
-import { useLiveQuery } from "@tanstack/react-db";
+import { useQuery } from "@tanstack/react-query";
 import { orpc } from "~/utils/orpc";
 import { toast } from "sonner";
 
@@ -20,10 +25,10 @@ export const Route = createFileRoute("/_layout/workflows/$workflowId/runs")({
   component: WorkflowRunsPage,
   loader: async ({ params: { workflowId }, context: { queryClient } }) => {
     const workflow = await queryClient.ensureQueryData(
-      orpc.workflows.getById.queryOptions({ input: { id: workflowId } })
+      workflowQueryOptions(workflowId)
     );
     const runs = await queryClient.ensureQueryData(
-      orpc.workflows.getRuns.queryOptions({ input: { id: workflowId } })
+      workflowRunsQueryOptions(workflowId)
     );
     return { workflow, runs };
   },
@@ -79,20 +84,29 @@ const columns: ColumnDef<WorkflowRun>[] = [
         from: "/_layout/workflows/$workflowId/runs",
       });
 
+      const cancelMutation = useCancelWorkflowRunMutation();
+      const deleteMutation = useDeleteWorkflowRunMutation();
+
       const onCancel = () => {
-        // Optimistic update - change status immediately
-        const runsCollection = createWorkflowRunsCollection(workflowId);
-        runsCollection.update(run.id, (draft) => {
-          draft.status = 'CANCELLED';
+        cancelMutation.mutate(run.id, {
+          onSuccess: () => {
+            toast.success("Run cancelled");
+          },
+          onError: (error) => {
+            toast.error(`Failed to cancel run: ${error.message}`);
+          },
         });
-        toast.success("Run cancelled");
       };
 
       const onDelete = () => {
-        // Optimistic deletion - remove from UI immediately
-        const runsCollection = createWorkflowRunsCollection(workflowId);
-        runsCollection.delete(run.id);
-        toast.success("Run deleted");
+        deleteMutation.mutate(run.id, {
+          onSuccess: () => {
+            toast.success("Run deleted");
+          },
+          onError: (error) => {
+            toast.error(`Failed to delete run: ${error.message}`);
+          },
+        });
       };
 
       return (
@@ -121,11 +135,9 @@ function WorkflowRunsPage() {
     from: "/_layout/workflows/$workflowId/runs",
   });
 
-  // Live query for workflow runs that automatically updates
-  const { data: runs } = useLiveQuery((q) =>
-    q.from({ run: createWorkflowRunsCollection(workflowId) })
-     .orderBy(({ run }) => run.startedAt, 'desc')
-  );
+  // Query for workflow runs that automatically updates
+  const { data: runsResponse } = useQuery(workflowRunsQueryOptions(workflowId));
+  const runs = runsResponse?.data || [];
 
   return (
     <div className="container mx-auto p-4 sm:p-6 lg:p-8">

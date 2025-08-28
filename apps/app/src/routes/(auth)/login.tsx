@@ -1,11 +1,11 @@
-import { useQueryClient } from "@tanstack/react-query";
-import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import * as near from "fastintear"; // just need to import types for window.near
+import {
+  createFileRoute,
+  useNavigate
+} from "@tanstack/react-router";
 import { useState } from "react";
 import { toast } from "sonner";
 import z from "zod";
 import { Button } from "~/components/ui/button";
-import { auth } from "~/lib/auth";
 import { authClient } from "~/lib/auth-client";
 
 const searchSchema = z.object({
@@ -18,17 +18,26 @@ export const Route = createFileRoute("/(auth)/login")({
   validateSearch: searchSchema,
 });
 
+function Loader() {
+  return (
+    <div className="flex items-center justify-center min-h-screen">
+      <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-gray-900"></div>
+    </div>
+  );
+}
+
 function LoginForm() {
-  const [isLoading, setIsLoading] = useState(false);
-  const [nearLoading, setNearLoading] = useState(false);
-  const queryClient = useQueryClient();
   const navigate = useNavigate();
   const { redirect } = Route.useSearch();
+  const { isPending } = authClient.useSession();
+  const { queryClient } = Route.useRouteContext();
 
-  // Check wallet connection status
-  const accountId =
-    (typeof window !== "undefined" && (window as any).near?.accountId()) ||
-    null;
+  const [isConnectingWallet, setIsConnectingWallet] = useState(false);
+  const [isSigningInWithNear, setIsSigningInWithNear] = useState(false);
+  const [isDisconnectingWallet, setIsDisconnectingWallet] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
+
+  const accountId = authClient.near.getAccountId();
 
   const handleAnonymousSignIn = async () => {
     setIsLoading(true);
@@ -45,107 +54,161 @@ function LoginForm() {
   };
 
   const handleWalletConnect = async () => {
-    setNearLoading(true);
-
+    setIsConnectingWallet(true);
     try {
-      await window.near.requestSignIn(
+      await authClient.requestSignIn.near(
+        { recipient: "run.everything.near" },
         {
-          contractId: "social.near",
-        },
-        {
-          onSuccess: (result: any) => {
-            toast.success(`Wallet connected: ${result.accountId}`);
-            setNearLoading(false);
-            // UI will re-render and show "Sign in with NEAR" button
+          onSuccess: () => {
+            setIsConnectingWallet(false);
+            toast.success(`Wallet connected`);
           },
           onError: (error: any) => {
+            setIsConnectingWallet(false);
             console.error("Wallet connection failed:", error);
-            toast.error(
-              error.type === "popup_blocked"
-                ? "Please allow popups and try again"
-                : "Failed to connect wallet"
-            );
-            setNearLoading(false);
+            const errorMessage =
+              error.code === "SIGNER_NOT_AVAILABLE"
+                ? "NEAR wallet not available"
+                : error.message || "Failed to connect wallet";
+            toast.error(errorMessage);
           },
         }
       );
     } catch (error) {
+      setIsConnectingWallet(false);
       console.error("Wallet connection error:", error);
       toast.error("Failed to connect to NEAR wallet");
-      setNearLoading(false);
     }
   };
 
   const handleNearSignIn = async () => {
-    setNearLoading(true);
+    setIsSigningInWithNear(true);
+    try {
+      await authClient.signIn.near(
+        { recipient: "run.everything.near" },
+        {
+          onSuccess: () => {
+            setIsSigningInWithNear(false);
+            navigate({
+              to: redirect || "/dashboard",
+              replace: true,
+            });
+            toast.success(`Signed in as: ${accountId}`);
+          },
+          onError: (error: unknown) => {
+            setIsSigningInWithNear(false);
+            console.error("NEAR sign in error:", error);
 
-    await authClient.signIn.near(
-      {
-        recipient: window.location.origin,
-        signer: window.near,
-      },
-      {
-        onError: (ctx) => {
-          console.error("NEAR sign in failed:", ctx);
-          toast.error(
-            ctx instanceof Error ? ctx.message : "Authentication failed"
-          );
-          setNearLoading(false);
-        },
-        onSuccess: async () => {
-          toast.success(`Signed in as: ${accountId}`);
-          await queryClient.invalidateQueries({ queryKey: ["user"] });
-          navigate({ to: redirect || "/" });
-        },
+            if ((error as any)?.code === "NONCE_NOT_FOUND") {
+              toast.error("Session expired. Please reconnect your wallet.");
+              handleWalletDisconnect();
+              return;
+            }
+
+            toast.error(
+              error instanceof Error ? error.message : "Authentication failed"
+            );
+          },
+        }
+      );
+    } catch (error) {
+      setIsSigningInWithNear(false);
+      console.error("NEAR sign in error:", error);
+
+      if ((error as any)?.code === "NONCE_NOT_FOUND") {
+        toast.error("Session expired. Please reconnect your wallet.");
+        handleWalletDisconnect();
+        return;
       }
-    );
+
+      toast.error("Authentication failed");
+    }
   };
 
+  const handleWalletDisconnect = async () => {
+    setIsDisconnectingWallet(true);
+    try {
+      await authClient.signOut();
+      await authClient.near.disconnect();
+      setIsDisconnectingWallet(false);
+      toast.success("Wallet disconnected successfully");
+    } catch (error) {
+      setIsDisconnectingWallet(false);
+      console.error("Wallet disconnect error:", error);
+      toast.error("Failed to disconnect wallet");
+    }
+  };
+
+  if (isPending) {
+    return <Loader />;
+  }
+
   return (
-    <div className="flex flex-col items-center justify-center min-h-screen p-8 space-y-4">
-      <div className="text-center">
-        <h2 className="text-xl font-semibold mb-2">Authentication Required</h2>
-        <p className="text-gray-600 mb-4">
-          Sign in with your NEAR wallet for full access, or continue as a guest
-          to explore.
-        </p>
-      </div>
+    <div className="w-full max-w-lg mx-auto">
+      <div className="bg-card border rounded-lg shadow-sm p-6 sm:p-8">
+        <div className="text-center mb-6 sm:mb-8">
+          <h1 className="text-2xl sm:text-3xl lg:text-4xl font-semibold mb-3 sm:mb-4">
+            Sign in with NEAR
+          </h1>
+          <p className="text-base sm:text-lg text-muted-foreground">
+            Connect your NEAR wallet to authenticate securely
+          </p>
+        </div>
 
-      <div className="space-y-3">
-        {!accountId ? (
+        <div className="space-y-3 sm:space-y-4">
+          {!accountId ? (
+            <Button
+              type="button"
+              className="w-full h-12 sm:h-14 text-base sm:text-lg font-medium touch-manipulation"
+              onClick={handleWalletConnect}
+              disabled={isConnectingWallet}
+            >
+              {isConnectingWallet
+                ? "Connecting Wallet..."
+                : "Connect NEAR Wallet"}
+            </Button>
+          ) : (
+            <div className="space-y-3 sm:space-y-4">
+              <Button
+                type="button"
+                className="w-full h-12 sm:h-14 text-base sm:text-lg font-medium touch-manipulation"
+                onClick={handleNearSignIn}
+                disabled={isSigningInWithNear}
+              >
+                {isSigningInWithNear
+                  ? "Signing in..."
+                  : `Sign in with NEAR (${accountId})`}
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                className="w-full h-12 sm:h-14 text-base sm:text-lg font-medium touch-manipulation"
+                onClick={handleWalletDisconnect}
+                disabled={isDisconnectingWallet}
+              >
+                {isDisconnectingWallet
+                  ? "Disconnecting..."
+                  : "Disconnect Wallet"}
+              </Button>
+            </div>
+          )}
+
           <Button
-            onClick={handleWalletConnect}
-            disabled={nearLoading}
-            className="w-full"
-            variant="default"
+            onClick={handleAnonymousSignIn}
+            disabled={isLoading}
+            className="w-full h-12 sm:h-14 text-base sm:text-lg font-medium touch-manipulation"
+            variant="outline"
           >
-            {nearLoading ? "Connecting Wallet..." : "Connect NEAR Wallet"}
+            {isLoading ? "Signing in..." : "Continue as Guest"}
           </Button>
-        ) : (
-          <Button
-            onClick={handleNearSignIn}
-            disabled={nearLoading}
-            className="w-full"
-            variant="default"
-          >
-            {nearLoading ? "Signing in..." : `Sign in with NEAR (${accountId})`}
-          </Button>
-        )}
+        </div>
 
-        <Button
-          onClick={handleAnonymousSignIn}
-          disabled={isLoading}
-          className="w-full"
-          variant="outline"
-        >
-          {isLoading ? "Signing in..." : "Continue as Guest"}
-        </Button>
+        <div className="mt-6 sm:mt-8 text-center">
+          <p className="text-xs sm:text-sm text-muted-foreground">
+            This demo uses fastintear for wallet connectivity.
+          </p>
+        </div>
       </div>
-
-      <p className="text-xs text-gray-500 text-center max-w-md">
-        As a guest, you can view the dashboard but some features may be limited.
-        Create an account for full access.
-      </p>
     </div>
   );
 }

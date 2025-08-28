@@ -1,34 +1,30 @@
-import { useLiveQuery } from "@tanstack/react-db";
+import { useQuery } from "@tanstack/react-query";
 import { createFileRoute, Link, Outlet } from "@tanstack/react-router";
 import { Play, Plus, Settings } from "lucide-react";
 import { Badge } from "~/components/ui/badge";
 import { Button } from "~/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "~/components/ui/card";
 import {
-  queueJobsCollection,
-  queueStatusCollection,
-  workflowsCollection,
-} from "~/db/collections";
+  workflowsQueryOptions,
+  queuesStatusQueryOptions,
+  allQueueJobsQueryOptions,
+  useToggleWorkflowStatusMutation,
+} from "~/lib/queries";
 
 export const Route = createFileRoute("/_layout/workflows/")({
   component: WorkflowsOverview,
 });
 
 function WorkflowsOverview() {
-  // Live queries that automatically update when data changes
-  const { data: workflows } = useLiveQuery((q) =>
-    q.from({ workflow: workflowsCollection })
-  );
+  // Queries that automatically update when data changes
+  const { data: workflowsResponse } = useQuery(workflowsQueryOptions);
+  const workflows = workflowsResponse?.data || [];
 
-  const { data: queuesStatus } = useLiveQuery((q) =>
-    q.from({ queue: queueStatusCollection })
-  );
+  const { data: queuesStatusResponse } = useQuery(queuesStatusQueryOptions);
+  const queuesStatus = queuesStatusResponse?.data || [];
 
-  const { data: recentJobs } = useLiveQuery((q) =>
-    q
-      .from({ job: queueJobsCollection })
-      .orderBy(({ job }) => job.timestamp, "desc")
-  );
+  const { data: recentJobsResponse } = useQuery(allQueueJobsQueryOptions({ limit: 10 }));
+  const recentJobs = recentJobsResponse?.data?.items || [];
 
   // Get only the first 5 recent jobs for display
   const displayJobs = recentJobs?.slice(0, 5);
@@ -122,12 +118,10 @@ function WorkflowsOverview() {
           ) : (
             <div className="space-y-4">
               {workflows.map((workflow) => {
+                const toggleMutation = useToggleWorkflowStatusMutation();
+                
                 const toggleWorkflowStatus = () => {
-                  // Optimistic mutation - UI updates instantly
-                  workflowsCollection.update(workflow.id, (draft) => {
-                    draft.status =
-                      draft.status === "ACTIVE" ? "INACTIVE" : "ACTIVE";
-                  });
+                  toggleMutation.mutate(workflow.id);
                 };
 
                 return (

@@ -1,35 +1,33 @@
+import { useQuery } from "@tanstack/react-query";
 import {
   createFileRoute,
   Link,
   useLoaderData,
   useNavigate,
 } from "@tanstack/react-router";
-import { useLiveQuery } from "@tanstack/react-db";
+import { PluginRun, SourceItem } from "@usersdotfun/shared-types/types";
 import { AlertCircle, Loader2, RotateCcw } from "lucide-react";
+import { toast } from "sonner";
+import { CodePreview } from "~/components/common/code-preview";
 import { CommonSheet } from "~/components/common/common-sheet";
 import { Alert, AlertDescription, AlertTitle } from "~/components/ui/alert";
 import { Badge } from "~/components/ui/badge";
 import { Button } from "~/components/ui/button";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "~/components/ui/tabs";
 import {
-  createRunDetailsCollection,
-  createPluginRunsCollection,
-  createRunItemsCollection,
-  createWorkflowRunsCollection,
-} from "~/db/collections";
-import {
-  Tabs,
-  TabsContent,
-  TabsList,
-  TabsTrigger,
-} from "~/components/ui/tabs";
-import { CodePreview } from "~/components/common/code-preview";
-import { orpc } from "~/utils/orpc";
+  runDetailsQueryOptions,
+  useCancelWorkflowRunMutation,
+  useDeleteWorkflowRunMutation,
+  useRetryPluginRunMutation,
+  workflowQueryOptions,
+  workflowRunItemsQueryOptions,
+  workflowRunPluginRunsQueryOptions,
+  workflowRunsQueryOptions,
+} from "~/lib/queries";
 import {
   pluginRunStatusColors,
   workflowRunStatusColors,
 } from "~/lib/status-colors";
-import { toast } from "sonner";
-import { PluginRun, SourceItem } from "@usersdotfun/shared-types/types";
 
 export const Route = createFileRoute(
   "/_layout/workflows/$workflowId/runs/$runId"
@@ -40,15 +38,9 @@ export const Route = createFileRoute(
     context: { queryClient },
   }) => {
     const [runDetails] = await Promise.all([
-      queryClient.ensureQueryData(
-        orpc.runs.getDetails.queryOptions({ input: { runId } })
-      ),
-      queryClient.ensureQueryData(
-        orpc.workflows.getById.queryOptions({ input: { id: workflowId } })
-      ),
-      queryClient.ensureQueryData(
-        orpc.workflows.getRuns.queryOptions({ input: { id: workflowId } })
-      ),
+      queryClient.ensureQueryData(runDetailsQueryOptions(runId)),
+      queryClient.ensureQueryData(workflowQueryOptions(workflowId)),
+      queryClient.ensureQueryData(workflowRunsQueryOptions(workflowId)),
     ]);
     return { runDetails };
   },
@@ -90,27 +82,32 @@ export const Route = createFileRoute(
 function RunDetailsPage() {
   const navigate = useNavigate({ from: Route.fullPath });
   const { runDetails: initialRunDetails } = useLoaderData({ from: Route.id });
-  const runId = initialRunDetails?.data?.id || '';
-  const workflowId = initialRunDetails?.data?.workflowId || '';
+  const runId = initialRunDetails?.data?.id || "";
+  const workflowId = initialRunDetails?.data?.workflowId || "";
 
-  // Live query for run details that automatically updates
-  const { data: runDetailsArray } = useLiveQuery((q) =>
-    q.from({ run: createRunDetailsCollection(runId) })
-  );
-  const runDetails = runDetailsArray?.[0]; // Single item wrapped in array
+  // Query for run details that automatically updates
+  const { data: runDetailsResponse } = useQuery(runDetailsQueryOptions(runId));
+  const runDetails = runDetailsResponse?.data;
 
-  // Live queries for plugin runs and items
-  const { data: sourcePluginRuns } = useLiveQuery((q) =>
-    q.from({ pluginRun: createPluginRunsCollection(runId, 'SOURCE') })
+  // Queries for plugin runs and items
+  const { data: sourcePluginRunsResponse } = useQuery(
+    workflowRunPluginRunsQueryOptions(runId, "SOURCE")
   );
+  const sourcePluginRuns = sourcePluginRunsResponse?.data?.pluginRuns || [];
 
-  const { data: runItems } = useLiveQuery((q) =>
-    q.from({ item: createRunItemsCollection(runId) })
+  const { data: runItemsResponse } = useQuery(
+    workflowRunItemsQueryOptions(runId)
   );
+  const runItems = runItemsResponse?.data || [];
 
-  const { data: pipelinePluginRuns } = useLiveQuery((q) =>
-    q.from({ pluginRun: createPluginRunsCollection(runId, 'PIPELINE') })
+  const { data: pipelinePluginRunsResponse } = useQuery(
+    workflowRunPluginRunsQueryOptions(runId, "PIPELINE")
   );
+  const pipelinePluginRuns = pipelinePluginRunsResponse?.data?.pluginRuns || [];
+
+  const cancelMutation = useCancelWorkflowRunMutation();
+  const deleteMutation = useDeleteWorkflowRunMutation();
+  const retryMutation = useRetryPluginRunMutation();
 
   const sourceLoading = false;
   const itemsLoading = false;
@@ -118,42 +115,44 @@ function RunDetailsPage() {
 
   const onCancel = () => {
     if (runDetails) {
-      // Optimistic update - change status immediately
-      const runsCollection = createWorkflowRunsCollection(workflowId);
-      runsCollection.update(runDetails.id, (draft) => {
-        draft.status = 'CANCELLED';
+      cancelMutation.mutate(runDetails.id, {
+        onSuccess: () => {
+          toast.success("Run cancelled");
+          handleClose();
+        },
+        onError: (error) => {
+          toast.error(`Failed to cancel run: ${error.message}`);
+        },
       });
-      
-      // Also update the run details collection
-      const runDetailsCollection = createRunDetailsCollection(runId);
-      runDetailsCollection.update(runDetails.id, (draft) => {
-        draft.status = 'CANCELLED';
-      });
-      
-      toast.success("Run cancelled");
-      handleClose();
     }
   };
 
   const onDelete = () => {
     if (runDetails) {
-      // Optimistic deletion - remove from UI immediately
-      const runsCollection = createWorkflowRunsCollection(workflowId);
-      runsCollection.delete(runDetails.id);
-      
-      toast.success("Run deleted");
-      handleClose();
+      deleteMutation.mutate(runDetails.id, {
+        onSuccess: () => {
+          toast.success("Run deleted");
+          handleClose();
+        },
+        onError: (error) => {
+          toast.error(`Failed to delete run: ${error.message}`);
+        },
+      });
     }
   };
 
   const handleRetry = (itemId: string, pluginRunId: string) => {
-    // Optimistic update - change plugin run status immediately
-    const pluginRunsCollection = createPluginRunsCollection(runId, 'PIPELINE');
-    pluginRunsCollection.update(pluginRunId, (draft) => {
-      draft.status = 'PENDING';
-    });
-    
-    toast.success('Plugin run queued for retry');
+    retryMutation.mutate(
+      { itemId, pluginRunId },
+      {
+        onSuccess: () => {
+          toast.success("Plugin run queued for retry");
+        },
+        onError: (error) => {
+          toast.error(`Failed to retry plugin run: ${error.message}`);
+        },
+      }
+    );
   };
 
   if (!runDetails) {
@@ -197,7 +196,7 @@ function RunDetailsPage() {
           <AlertDescription>{runDetails.failureReason}</AlertDescription>
         </Alert>
       )}
-      
+
       <div className="space-y-6">
         {/* Run Overview */}
         <div className="flex justify-between items-center">
@@ -223,7 +222,7 @@ function RunDetailsPage() {
             </Button>
           </div>
         </div>
-        
+
         <div className="grid grid-cols-2 gap-4 text-sm">
           <div className="font-semibold">Status</div>
           <div>
@@ -251,22 +250,30 @@ function RunDetailsPage() {
         <Tabs defaultValue="source" className="w-full">
           <TabsList className="grid w-full grid-cols-3">
             <TabsTrigger value="source">Source</TabsTrigger>
-            <TabsTrigger value="items">Items ({runItems?.length || 0})</TabsTrigger>
+            <TabsTrigger value="items">
+              Items ({runItems?.length || 0})
+            </TabsTrigger>
             <TabsTrigger value="pipeline">Pipeline</TabsTrigger>
           </TabsList>
-          
+
           <TabsContent value="source">
             <div className="space-y-4">
               <h4 className="font-medium">Source Plugin Runs</h4>
               {sourceLoading ? (
-                <div className="text-center py-4">Loading source plugin runs...</div>
+                <div className="text-center py-4">
+                  Loading source plugin runs...
+                </div>
               ) : sourcePluginRuns?.length ? (
                 <div className="space-y-3">
                   {sourcePluginRuns?.map((pluginRun: PluginRun) => (
                     <div key={pluginRun.id} className="border p-3 rounded-md">
                       <div className="flex justify-between items-center mb-2">
-                        <p className="font-semibold text-sm">{pluginRun.stepId}</p>
-                        <Badge variant={pluginRunStatusColors[pluginRun.status]}>
+                        <p className="font-semibold text-sm">
+                          {pluginRun.stepId}
+                        </p>
+                        <Badge
+                          variant={pluginRunStatusColors[pluginRun.status]}
+                        >
                           {pluginRun.status}
                         </Badge>
                       </div>
@@ -278,20 +285,34 @@ function RunDetailsPage() {
                           <TabsTrigger value="input">Input</TabsTrigger>
                           <TabsTrigger value="output">Output</TabsTrigger>
                           <TabsTrigger value="config">Config</TabsTrigger>
-                          {pluginRun.error && <TabsTrigger value="error">Error</TabsTrigger>}
+                          {pluginRun.error && (
+                            <TabsTrigger value="error">Error</TabsTrigger>
+                          )}
                         </TabsList>
                         <TabsContent value="input">
-                          <CodePreview code={pluginRun.input} maxHeight="12rem" />
+                          <CodePreview
+                            code={pluginRun.input}
+                            maxHeight="12rem"
+                          />
                         </TabsContent>
                         <TabsContent value="output">
-                          <CodePreview code={pluginRun.output} maxHeight="12rem" />
+                          <CodePreview
+                            code={pluginRun.output}
+                            maxHeight="12rem"
+                          />
                         </TabsContent>
                         <TabsContent value="config">
-                          <CodePreview code={pluginRun.config} maxHeight="12rem" />
+                          <CodePreview
+                            code={pluginRun.config}
+                            maxHeight="12rem"
+                          />
                         </TabsContent>
                         {pluginRun.error && (
                           <TabsContent value="error">
-                            <CodePreview code={pluginRun.error} maxHeight="12rem" />
+                            <CodePreview
+                              code={pluginRun.error}
+                              maxHeight="12rem"
+                            />
                           </TabsContent>
                         )}
                       </Tabs>
@@ -305,7 +326,7 @@ function RunDetailsPage() {
               )}
             </div>
           </TabsContent>
-          
+
           <TabsContent value="items">
             <div className="space-y-4">
               <h4 className="font-medium">Items Processed in This Run</h4>
@@ -318,19 +339,18 @@ function RunDetailsPage() {
                       <div className="flex justify-between items-center mb-2">
                         <Link
                           to="/workflows/$workflowId/items/$itemId"
-                          params={{ 
-                            workflowId: runDetails.workflowId, 
-                            itemId: item.id 
+                          params={{
+                            workflowId: runDetails.workflowId,
+                            itemId: item.id,
                           }}
                           className="font-mono text-xs text-primary hover:underline"
                         >
                           {item.id.slice(0, 12)}...
                         </Link>
                         <div className="text-xs text-muted-foreground">
-                          {item.processedAt 
+                          {item.processedAt
                             ? `Processed: ${new Date(item.processedAt).toLocaleString()}`
-                            : 'Processing...'
-                          }
+                            : "Processing..."}
                         </div>
                       </div>
                       <div className="text-xs text-muted-foreground">
@@ -346,25 +366,29 @@ function RunDetailsPage() {
               )}
             </div>
           </TabsContent>
-          
+
           <TabsContent value="pipeline">
             <div className="space-y-4">
               <h4 className="font-medium">Pipeline Plugin Runs</h4>
               {pipelineLoading ? (
-                <div className="text-center py-4">Loading pipeline plugin runs...</div>
+                <div className="text-center py-4">
+                  Loading pipeline plugin runs...
+                </div>
               ) : pipelinePluginRuns?.length ? (
                 <div className="space-y-3">
                   {pipelinePluginRuns?.map((pluginRun: PluginRun) => (
                     <div key={pluginRun.id} className="border p-3 rounded-md">
                       <div className="flex justify-between items-center mb-2">
                         <div>
-                          <p className="font-semibold text-sm">{pluginRun.stepId}</p>
+                          <p className="font-semibold text-sm">
+                            {pluginRun.stepId}
+                          </p>
                           {pluginRun.sourceItemId && (
                             <Link
                               to="/workflows/$workflowId/items/$itemId"
-                              params={{ 
-                                workflowId: runDetails.workflowId, 
-                                itemId: pluginRun.sourceItemId 
+                              params={{
+                                workflowId: runDetails.workflowId,
+                                itemId: pluginRun.sourceItemId,
                               }}
                               className="text-xs text-primary hover:underline"
                             >
@@ -373,46 +397,71 @@ function RunDetailsPage() {
                           )}
                         </div>
                         <div className="flex items-center gap-2">
-                          <Badge variant={pluginRunStatusColors[pluginRun.status]}>
+                          <Badge
+                            variant={pluginRunStatusColors[pluginRun.status]}
+                          >
                             {pluginRun.status}
                           </Badge>
-                          {pluginRun.status === 'FAILED' && pluginRun.sourceItemId && (
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              onClick={() => handleRetry(pluginRun.sourceItemId!, pluginRun.id)}
-                            >
-                              <RotateCcw className="h-3 w-3 mr-1" />
-                              Retry
-                            </Button>
-                          )}
+                          {pluginRun.status === "FAILED" &&
+                            pluginRun.sourceItemId && (
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                onClick={() =>
+                                  handleRetry(
+                                    pluginRun.sourceItemId!,
+                                    pluginRun.id
+                                  )
+                                }
+                              >
+                                <RotateCcw className="h-3 w-3 mr-1" />
+                                Retry
+                              </Button>
+                            )}
                         </div>
                       </div>
                       <p className="text-xs text-muted-foreground mb-2">
                         Plugin: {pluginRun.pluginId}
-                        {pluginRun.retryCount && pluginRun.retryCount !== '0' && (
-                          <span className="ml-2">• Retry #{pluginRun.retryCount}</span>
-                        )}
+                        {pluginRun.retryCount &&
+                          pluginRun.retryCount !== "0" && (
+                            <span className="ml-2">
+                              • Retry #{pluginRun.retryCount}
+                            </span>
+                          )}
                       </p>
                       <Tabs defaultValue="input">
                         <TabsList>
                           <TabsTrigger value="input">Input</TabsTrigger>
                           <TabsTrigger value="output">Output</TabsTrigger>
                           <TabsTrigger value="config">Config</TabsTrigger>
-                          {pluginRun.error && <TabsTrigger value="error">Error</TabsTrigger>}
+                          {pluginRun.error && (
+                            <TabsTrigger value="error">Error</TabsTrigger>
+                          )}
                         </TabsList>
                         <TabsContent value="input">
-                          <CodePreview code={pluginRun.input} maxHeight="12rem" />
+                          <CodePreview
+                            code={pluginRun.input}
+                            maxHeight="12rem"
+                          />
                         </TabsContent>
                         <TabsContent value="output">
-                          <CodePreview code={pluginRun.output} maxHeight="12rem" />
+                          <CodePreview
+                            code={pluginRun.output}
+                            maxHeight="12rem"
+                          />
                         </TabsContent>
                         <TabsContent value="config">
-                          <CodePreview code={pluginRun.config} maxHeight="12rem" />
+                          <CodePreview
+                            code={pluginRun.config}
+                            maxHeight="12rem"
+                          />
                         </TabsContent>
                         {pluginRun.error && (
                           <TabsContent value="error">
-                            <CodePreview code={pluginRun.error} maxHeight="12rem" />
+                            <CodePreview
+                              code={pluginRun.error}
+                              maxHeight="12rem"
+                            />
                           </TabsContent>
                         )}
                       </Tabs>

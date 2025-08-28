@@ -31,7 +31,7 @@ const getUser = createServerFn({ method: "GET" }).handler(async () => {
 });
 
 export interface RouterAppContext {
-  orpc: typeof orpc;
+  // orpc: typeof orpc;
   queryClient: QueryClient;
   user: Awaited<ReturnType<typeof getUser>>
 }
@@ -100,26 +100,6 @@ export const Route = createRootRouteWithContext<RouterAppContext>()({
       },
       { rel: "manifest", href: "/site.webmanifest", color: "#fffff" },
       { rel: "icon", href: "/favicon.ico" },
-    ],
-    scripts: [
-      {
-        src: "https://unpkg.com/fastintear@latest/dist/umd/browser.global.js",
-        // src: "../../../../node_modules/fastintear/dist/umd/browser.global.js",
-        type: "text/javascript",
-      },
-      {
-        // TODO: move to a near lib file
-        children: `
-      window.near && window.near.config({ networkId: "mainnet" });
-      
-      if (typeof window.near !== "undefined") {
-        console.log("NEAR (via global object 'near') is ready!");
-      } else {
-        console.error("NEAR global object 'near' not found!");
-      }
-    `,
-        type: "text/javascript",
-      },
     ],
   }),
   errorComponent: DefaultCatchBoundary,

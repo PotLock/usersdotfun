@@ -2,8 +2,8 @@ import { schema } from "@usersdotfun/shared-db";
 import { betterAuth } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { admin, anonymous, jwt } from "better-auth/plugins";
-import { siwn } from "better-near-auth";
-import { generateNonce } from "near-sign-verify";
+// import { siwn } from "better-near-auth";
+// import { generateNonce } from "near-sign-verify";
 import { db } from "../db";
 
 export const auth = betterAuth({
@@ -15,12 +15,12 @@ export const auth = betterAuth({
   secret: process.env.BETTER_AUTH_SECRET || "your-secret-here",
   plugins: [
     anonymous(),
-    siwn({
-      recipient: process.env.DOMAIN || "localhost:3000",
-      getNonce: async () => {
-        return generateNonce();
-      },
-    }),
+    // siwn({
+    //   recipient: "run.everything.near",
+    //   getNonce: async () => {
+    //     return generateNonce();
+    //   },
+    // }),
     admin({
       defaultRole: "user",
       adminRoles: ["admin"],

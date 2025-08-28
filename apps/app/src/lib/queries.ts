@@ -1,21 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import {
-  GetAllQueueJobsResponseSchema,
-  GetQueueJobsResponseSchema,
-  GetQueuesStatusResponseSchema,
-  GetWorkflowItemsResponseSchema,
-  GetWorkflowResponseSchema,
-  GetWorkflowRunResponseSchema,
-  GetWorkflowRunsResponseSchema,
-  GetWorkflowsResponseSchema
-} from "@usersdotfun/shared-types/schemas";
 import { orpc } from "~/utils/orpc";
-
-function extractData<T extends { data?: any }>(
-  promise: Promise<T>
-): Promise<T["data"]> {
-  return promise.then((res) => res.data);
-}
 
 export const queryKeys = {
   workflows: {
@@ -43,59 +27,48 @@ export const queryKeys = {
   },
 } as const;
 
-// --- Workflow Queries ---
-export const workflowsQueryOptions = orpc.workflows.list.queryOptions();
-
-export const useWorkflowsQuery = () => useQuery(workflowsQueryOptions);
+// --- Query Options ---
+export const workflowsQueryOptions = orpc.workflows.getAll.queryOptions();
 
 export const workflowQueryOptions = (workflowId: string) => 
-  orpc.workflows.get.queryOptions({ input: { id: workflowId } });
+  orpc.workflows.getById.queryOptions({ input: { id: workflowId } });
 
-export const useWorkflowQuery = (workflowId: string) =>
-  useQuery(workflowQueryOptions(workflowId));
-
-// --- Run Queries ---
 export const workflowRunsQueryOptions = (workflowId: string) => 
-  orpc.workflows.runs.queryOptions({ input: { id: workflowId } });
-
-export const useWorkflowRunsQuery = (workflowId: string) =>
-  useQuery(workflowRunsQueryOptions(workflowId));
+  orpc.workflows.getRuns.queryOptions({ input: { id: workflowId } });
 
 export const runDetailsQueryOptions = (runId: string) => 
-  orpc.runs.details.queryOptions({ input: { runId } });
+  orpc.runs.getDetails.queryOptions({ input: { runId } });
 
-export const useRunDetailsQuery = (runId: string) =>
-  useQuery(runDetailsQueryOptions(runId));
-
-// --- Item Queries ---
 export const workflowItemsQueryOptions = (workflowId: string) => 
-  orpc.workflows.items.queryOptions({ input: { id: workflowId } });
+  orpc.workflows.getItems.queryOptions({ input: { id: workflowId } });
 
-export const useWorkflowItemsQuery = (workflowId: string) =>
-  useQuery(workflowItemsQueryOptions(workflowId));
-
-// --- Queue Queries ---
-export const queuesStatusQueryOptions = orpc.queues.status.queryOptions();
-
-export const useQueuesStatusQuery = () => useQuery(queuesStatusQueryOptions);
+export const queuesStatusQueryOptions = orpc.queues.getAll.queryOptions();
 
 export const queueDetailsQueryOptions = (queueName: string) => 
-  orpc.queues.jobs.queryOptions({ input: { queueName, status: "all" } });
-
-export const useQueueDetailsQuery = (queueName: string) =>
-  useQuery(queueDetailsQueryOptions(queueName));
+  orpc.queues.getQueueJobs.queryOptions({ input: { queueName } });
 
 export const allQueueJobsQueryOptions = (filters?: {
   status?: string;
   queueName?: string;
   limit?: number;
-}) => orpc.queues.allJobs.queryOptions({ input: filters });
+}) => orpc.queues.getAllJobs.queryOptions({ input: filters });
 
-export const useAllQueueJobsQuery = (filters?: {
-  status?: string;
-  queueName?: string;
-  limit?: number;
-}) => useQuery(allQueueJobsQueryOptions(filters));
+export const workflowRunItemsQueryOptions = (runId: string) => 
+  orpc.runs.getItems.queryOptions({ input: { runId } });
+
+export const itemPluginRunsQueryOptions = (itemId: string, workflowId?: string) => {
+  if (workflowId) {
+    return orpc.workflows.getItemPluginRuns.queryOptions({ input: { id: workflowId, itemId } });
+  } else {
+    return orpc.items.getPluginRuns.queryOptions({ input: { itemId } });
+  }
+};
+
+export const itemWorkflowRunsQueryOptions = (itemId: string) => 
+  orpc.items.getWorkflowRuns.queryOptions({ input: { itemId } });
+
+export const workflowRunPluginRunsQueryOptions = (runId: string, type?: 'SOURCE' | 'PIPELINE') => 
+  orpc.runs.getPluginRuns.queryOptions({ input: { runId, type } });
 
 // --- Mutations ---
 export const useCreateWorkflowMutation = () => {
@@ -161,6 +134,14 @@ export const useCancelWorkflowRunMutation = () => {
       queryClient.invalidateQueries({
         queryKey: queryKeys.runs.detail(runId),
       });
+      queryClient.invalidateQueries({
+        queryKey: queryKeys.runs.items(runId),
+      });
+      queryClient.invalidateQueries({
+        queryKey: queryKeys.runs.pluginRuns(runId),
+      });
+      // Invalidate all workflow runs since we don't know which workflow this run belongs to
+      queryClient.invalidateQueries({ queryKey: ["workflows"] });
     },
   });
 };
@@ -173,6 +154,14 @@ export const useDeleteWorkflowRunMutation = () => {
       queryClient.invalidateQueries({
         queryKey: queryKeys.runs.detail(runId),
       });
+      queryClient.invalidateQueries({
+        queryKey: queryKeys.runs.items(runId),
+      });
+      queryClient.invalidateQueries({
+        queryKey: queryKeys.runs.pluginRuns(runId),
+      });
+      // Invalidate all workflow runs since we don't know which workflow this run belongs to
+      queryClient.invalidateQueries({ queryKey: ["workflows"] });
     },
   });
 };
@@ -189,50 +178,25 @@ export const useRetryWorkflowMutation = () => {
       itemId: string;
       fromStepId: string;
     }) =>
-      extractData(
-        callApi({
-          data: {
-            path: `/runs/${runId}/items/${itemId}/retry`,
-            method: "POST",
-            body: { fromStepId },
-          },
-        })
-      ),
-    onSuccess: (_, { runId }) => {
+      orpc.runs.retryFromStep.call({ runId, itemId, fromStepId }),
+    onSuccess: (_, { runId, itemId }) => {
       queryClient.invalidateQueries({
         queryKey: queryKeys.runs.detail(runId),
+      });
+      queryClient.invalidateQueries({
+        queryKey: queryKeys.runs.items(runId),
+      });
+      queryClient.invalidateQueries({
+        queryKey: queryKeys.runs.pluginRuns(runId),
+      });
+      queryClient.invalidateQueries({
+        queryKey: queryKeys.items.pluginRuns(itemId),
       });
     },
   });
 };
 
 // Queue mutations
-
-export const useRetryQueueJobMutation = () => {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: ({
-      queueName,
-      jobId,
-    }: {
-      queueName: string;
-      jobId: string;
-    }) =>
-      extractData(
-        callApi({
-          data: {
-            path: `/queues/${queueName}/jobs/${jobId}/retry`,
-            method: "POST",
-          },
-        })
-      ),
-    onSuccess: (_data, variables) => {
-      queryClient.invalidateQueries({
-        queryKey: queryKeys.queues.jobs(variables.queueName),
-      });
-    },
-  });
-};
 
 export const useRemoveQueueJobMutation = () => {
   const queryClient = useQueryClient();
@@ -244,12 +208,7 @@ export const useRemoveQueueJobMutation = () => {
       queueName: string;
       jobId: string;
     }) =>
-      callApi({
-        data: {
-          path: `/queues/${queueName}/jobs/${jobId}`,
-          method: "DELETE",
-        },
-      }),
+      orpc.queues.deleteJob.call({ queueName, jobId }),
     onSuccess: (_data, variables) => {
       queryClient.invalidateQueries({
         queryKey: queryKeys.queues.jobs(variables.queueName),
@@ -263,11 +222,7 @@ export const usePauseQueueMutation = () => {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (queueName: string) =>
-      extractData(
-        callApi({
-          data: { path: `/queues/${queueName}/pause`, method: "POST" },
-        })
-      ),
+      orpc.queues.pauseQueue.call({ queueName }),
     onSuccess: (_data, queueName) => {
       queryClient.invalidateQueries({ queryKey: queryKeys.queues.all() });
       queryClient.invalidateQueries({
@@ -281,11 +236,7 @@ export const useResumeQueueMutation = () => {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (queueName: string) =>
-      extractData(
-        callApi({
-          data: { path: `/queues/${queueName}/resume`, method: "POST" },
-        })
-      ),
+      orpc.queues.resumeQueue.call({ queueName }),
     onSuccess: (_data, queueName) => {
       queryClient.invalidateQueries({ queryKey: queryKeys.queues.all() });
       queryClient.invalidateQueries({
@@ -300,20 +251,12 @@ export const useClearQueueMutation = () => {
   return useMutation({
     mutationFn: ({
       queueName,
-      jobType,
+      jobType = "all",
     }: {
       queueName: string;
       jobType?: "all" | "completed" | "failed";
     }) =>
-      extractData(
-        callApi({
-          data: {
-            path: `/queues/${queueName}/clear`,
-            method: "POST",
-            body: { jobType },
-          },
-        })
-      ),
+      orpc.queues.clearQueue.call({ queueName, jobType }),
     onSuccess: (_data, variables) => {
       queryClient.invalidateQueries({ queryKey: queryKeys.queues.all() });
       queryClient.invalidateQueries({
@@ -323,88 +266,19 @@ export const useClearQueueMutation = () => {
   });
 };
 
-// Enhanced query options
-export const workflowRunItemsQueryOptions = (runId: string) => ({
-  queryKey: queryKeys.runs.items(runId),
-  queryFn: () =>
-    extractData(
-      callApi({
-        data: { path: `/runs/${runId}/items`, method: "GET" },
-      })
-    ),
-  enabled: !!runId,
-});
-
-export const useWorkflowRunItemsQuery = (runId: string) =>
-  useQuery(workflowRunItemsQueryOptions(runId));
-
-export const itemPluginRunsQueryOptions = (itemId: string, workflowId?: string) => ({
-  queryKey: queryKeys.items.pluginRuns(itemId, workflowId),
-  queryFn: () => {
-    const url = workflowId
-      ? `/workflows/${workflowId}/items/${itemId}/plugin-runs`
-      : `/items/${itemId}/plugin-runs`;
-    return extractData(
-      callApi({
-        data: { path: url, method: "GET" },
-      })
-    );
-  },
-  enabled: !!itemId,
-});
-
-export const useItemPluginRunsQuery = (itemId: string, workflowId?: string) =>
-  useQuery(itemPluginRunsQueryOptions(itemId, workflowId));
-
-export const itemWorkflowRunsQueryOptions = (itemId: string) => ({
-  queryKey: queryKeys.items.workflowRuns(itemId),
-  queryFn: () =>
-    extractData(
-      callApi({
-        data: { path: `/items/${itemId}/workflow-runs`, method: "GET" },
-      })
-    ),
-  enabled: !!itemId,
-});
-
-export const useItemWorkflowRunsQuery = (itemId: string) =>
-  useQuery(itemWorkflowRunsQueryOptions(itemId));
-
-export const workflowRunPluginRunsQueryOptions = (runId: string, type?: 'SOURCE' | 'PIPELINE') => ({
-  queryKey: queryKeys.runs.pluginRuns(runId, type),
-  queryFn: () => {
-    const url = `/runs/${runId}/plugin-runs${type ? `?type=${type}` : ''}`;
-    return extractData(
-      callApi({
-        data: { path: url, method: "GET" },
-      })
-    );
-  },
-  enabled: !!runId,
-});
-
-export const useWorkflowRunPluginRunsQuery = (runId: string, type?: 'SOURCE' | 'PIPELINE') =>
-  useQuery(workflowRunPluginRunsQueryOptions(runId, type));
-
 // Retry mutation
 export const useRetryPluginRunMutation = () => {
   const queryClient = useQueryClient();
 
   return useMutation({
     mutationFn: ({ itemId, pluginRunId }: { itemId: string; pluginRunId: string }) =>
-      extractData(
-        callApi({
-          data: {
-            path: `/items/${itemId}/plugin-runs/${pluginRunId}/retry`,
-            method: "POST",
-          },
-        })
-      ),
-    onSuccess: () => {
-      // Invalidate related queries
-      queryClient.invalidateQueries({ queryKey: ["items"] });
-      queryClient.invalidateQueries({ queryKey: ["runs"] });
-      queryClient.invalidateQueries({ queryKey: ["workflows"] });
+      orpc.items.retryPluginRun.call({ itemId, pluginRunId }),
+    onSuccess: (_, { itemId }) => {
+      // More targeted invalidations
+      queryClient.invalidateQueries({ queryKey: queryKeys.items.pluginRuns(itemId) });
+      queryClient.invalidateQueries({ queryKey: queryKeys.items.workflowRuns(itemId) });
+      // Invalidate all queue jobs since plugin runs affect job status
+      queryClient.invalidateQueries({ queryKey: queryKeys.queues.all() });
     },
   });
 };

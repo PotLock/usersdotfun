@@ -1,4 +1,4 @@
-import { useLiveQuery } from "@tanstack/react-db";
+import { useQuery } from "@tanstack/react-query";
 import {
   createFileRoute,
   Link,
@@ -43,11 +43,12 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "~/components/ui/tooltip";
-import { createWorkflowRunsCollection, workflowsCollection } from "~/db/collections";
+import { workflowsQueryOptions, useRunWorkflowNowMutation, useToggleWorkflowStatusMutation } from "~/lib/queries";
 import { workflowStatusColors } from "~/lib/status-colors";
 
 export const Route = createFileRoute("/_layout/workflows")({
   component: WorkflowsLayout,
+  ssr: false
 });
 
 function WorkflowsLayout() {
@@ -57,11 +58,13 @@ function WorkflowsLayout() {
   const router = useRouterState();
   const currentPath = router.location.pathname;
 
-  // Live query for workflows that automatically updates
-  const { data: workflows } = useLiveQuery((q) =>
-    q.from({ workflow: workflowsCollection })
-     .orderBy(({ workflow }) => workflow.createdAt, 'desc')
-  );
+  // Query for workflows
+  const { data: workflowsResponse } = useQuery(workflowsQueryOptions);
+  const workflows = workflowsResponse?.data || [];
+
+  // Mutations
+  const runWorkflowMutation = useRunWorkflowNowMutation();
+  const toggleWorkflowMutation = useToggleWorkflowStatusMutation();
 
   // Extract workflowId from any nested route
   const workflowId = (params as any).workflowId;
@@ -70,39 +73,38 @@ function WorkflowsLayout() {
     e.stopPropagation();
     e.preventDefault();
     
-    // Create optimistic run entry
-    const runsCollection = createWorkflowRunsCollection(workflowId);
-    
-    const newWorkflow = runsCollection.insert({
-      id: "...",
-      workflowId,
-      status: 'PENDING',
-      startedAt: new Date(),
-      completedAt: null,
-      failureReason: null,
-      itemsProcessed: 0,
-      itemsTotal: 0,
-      triggeredBy: user.id,
-      user: user
-    });
-
-    toast.success("Workflow triggered successfully!");
-    navigate({
-      to: "/workflows/$workflowId/runs/$runId",
-      params: { workflowId, runId: newWorkflow.id },
-    });
+    try {
+      const result = await runWorkflowMutation.mutateAsync(workflowId);
+      toast.success("Workflow triggered successfully!");
+      
+      // Navigate to the new run if we get the run data back
+      if (result?.data?.id) {
+        navigate({
+          to: "/workflows/$workflowId/runs/$runId",
+          params: { workflowId, runId: result.data.id },
+        });
+      } else {
+        // Fallback to runs list
+        navigate({
+          to: "/workflows/$workflowId/runs",
+          params: { workflowId },
+        });
+      }
+    } catch (error) {
+      toast.error("Failed to trigger workflow");
+    }
   };
 
   const handleToggle = async (workflowId: string, e: React.MouseEvent) => {
     e.stopPropagation();
     e.preventDefault();
     
-    // Optimistic mutation - UI updates instantly
-    workflowsCollection.update(workflowId, (draft) => {
-      draft.status = draft.status === 'ACTIVE' ? 'INACTIVE' : 'ACTIVE';
-    });
-    
-    toast.success("Status toggled successfully!");
+    try {
+      await toggleWorkflowMutation.mutateAsync(workflowId);
+      toast.success("Status toggled successfully!");
+    } catch (error) {
+      toast.error("Failed to toggle workflow status");
+    }
   };
 
   return (

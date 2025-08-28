@@ -26,9 +26,16 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "~/components/ui/dropdown-menu";
-import { queueStatusCollection, queueJobsCollection } from "~/db/collections";
+import {
+  queuesStatusQueryOptions,
+  allQueueJobsQueryOptions,
+  useRemoveQueueJobMutation,
+  usePauseQueueMutation,
+  useResumeQueueMutation,
+  useClearQueueMutation,
+} from "~/lib/queries";
 import { cn } from "~/lib/utils";
-import { useLiveQuery, eq } from "@tanstack/react-db";
+import { useQuery } from "@tanstack/react-query";
 import { orpc } from "~/utils/orpc";
 
 export const Route = createFileRoute("/_layout/queues/")({
@@ -38,10 +45,10 @@ export const Route = createFileRoute("/_layout/queues/")({
   }),
   loader: async ({ context: { queryClient } }) => {
     const queuesStatus = await queryClient.ensureQueryData(
-      orpc.queues.getAll.queryOptions()
+      queuesStatusQueryOptions
     );
     const jobs = await queryClient.ensureQueryData(
-      orpc.queues.getAllJobs.queryOptions()
+      allQueueJobsQueryOptions()
     );
     return { queuesStatus, jobs };
   },
@@ -204,25 +211,16 @@ function QueuesPage() {
   const { queueName: selectedQueue } = Route.useSearch();
   const navigate = useNavigate({ from: Route.fullPath });
 
-  // Live queries that automatically update when data changes
-  const { data: queuesStatus } = useLiveQuery((q) =>
-    q.from({ queue: queueStatusCollection })
-  );
+  // Queries that automatically update when data changes
+  const { data: queuesStatusResponse } = useQuery(queuesStatusQueryOptions);
+  const queuesStatus = queuesStatusResponse?.data || [];
   
-  const { data: allJobs } = useLiveQuery((q) =>
-    q.from({ job: queueJobsCollection })
-     .orderBy(({ job }) => job.timestamp, 'desc')
-  );
+  const { data: allJobsResponse } = useQuery(allQueueJobsQueryOptions());
+  const allJobs = allJobsResponse?.data?.items || [];
 
   // Filter jobs by selected queue if specified
-  const { data: jobs } = useLiveQuery((q) =>
-    selectedQueue
-      ? q.from({ job: queueJobsCollection })
-         .where(({ job }) => eq(job.queueName, selectedQueue))
-         .orderBy(({ job }) => job.timestamp, 'desc')
-      : q.from({ job: queueJobsCollection })
-         .orderBy(({ job }) => job.timestamp, 'desc')
-  );
+  const { data: jobsResponse } = useQuery(allQueueJobsQueryOptions(selectedQueue ? { queueName: selectedQueue } : undefined));
+  const jobs = jobsResponse?.data?.items || [];
 
   const [rowSelection, setRowSelection] = useState({});
   const [isDeleteDialogOpen, setDeleteDialogOpen] = useState(false);
@@ -238,14 +236,23 @@ function QueuesPage() {
     });
   };
 
+  const removeJobMutation = useRemoveQueueJobMutation();
+  const pauseQueueMutation = usePauseQueueMutation();
+  const resumeQueueMutation = useResumeQueueMutation();
+  const clearQueueMutation = useClearQueueMutation();
+
   const handleDelete = async () => {
     const idsToDelete = Object.keys(rowSelection);
     if (!selectedQueue) return;
     
-    // Optimistic deletion - remove jobs from UI immediately
-    idsToDelete.forEach((id) => {
-      queueJobsCollection.delete(id);
-    });
+    // Delete each selected job
+    for (const jobId of idsToDelete) {
+      removeJobMutation.mutate({ queueName: selectedQueue, jobId }, {
+        onError: (error) => {
+          toast.error(`Failed to delete job ${jobId}: ${error.message}`);
+        },
+      });
+    }
     
     toast.success("Jobs deleted successfully!");
     setRowSelection({});
@@ -255,29 +262,36 @@ function QueuesPage() {
   const handleClear = async () => {
     if (!selectedQueue) return;
     
-    // Optimistic clear - remove all jobs for this queue
-    const jobsToDelete = jobs?.filter(job => job.queueName === selectedQueue) || [];
-    jobsToDelete.forEach((job) => {
-      queueJobsCollection.delete(job.id);
+    clearQueueMutation.mutate({ queueName: selectedQueue }, {
+      onSuccess: () => {
+        toast.success("Queue cleared successfully!");
+      },
+      onError: (error) => {
+        toast.error(`Failed to clear queue: ${error.message}`);
+      },
     });
-    
-    toast.success("Queue cleared successfully!");
   };
 
   const handlePauseQueue = (queueName: string) => {
-    // Optimistic update - pause queue immediately
-    queueStatusCollection.update(queueName, (draft) => {
-      draft.paused = true;
+    pauseQueueMutation.mutate(queueName, {
+      onSuccess: () => {
+        toast.success(`Queue ${queueName} paused`);
+      },
+      onError: (error) => {
+        toast.error(`Failed to pause queue: ${error.message}`);
+      },
     });
-    toast.success(`Queue ${queueName} paused`);
   };
 
   const handleResumeQueue = (queueName: string) => {
-    // Optimistic update - resume queue immediately
-    queueStatusCollection.update(queueName, (draft) => {
-      draft.paused = false;
+    resumeQueueMutation.mutate(queueName, {
+      onSuccess: () => {
+        toast.success(`Queue ${queueName} resumed`);
+      },
+      onError: (error) => {
+        toast.error(`Failed to resume queue: ${error.message}`);
+      },
     });
-    toast.success(`Queue ${queueName} resumed`);
   };
 
   return (
@@ -332,9 +346,9 @@ function QueuesPage() {
                   <Button
                     variant="outline"
                     onClick={() => {
-                      // Clear all jobs from all queues
-                      allJobs?.forEach((job) => {
-                        queueJobsCollection.delete(job.id);
+                      // Clear all queues
+                      queuesStatus?.forEach((queue) => {
+                        clearQueueMutation.mutate({ queueName: queue.name });
                       });
                       toast.success("All queues cleared!");
                     }}

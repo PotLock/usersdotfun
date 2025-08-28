@@ -1,15 +1,14 @@
 import { BetterAuthClientPlugin } from "better-auth";
 import { adminClient, anonymousClient } from "better-auth/client/plugins";
 import { createAuthClient } from "better-auth/react";
-import { siwnClient } from "better-near-auth";
-import * as near from "fastintear";
+import { siwnClient } from "better-near-auth/client";
 
 export const authClient = createAuthClient({
-  baseURL: "http:localhost:3000",
+  baseURL: import.meta.env.BETTER_AUTH_URL,
   plugins: [
     anonymousClient(),
     siwnClient({
-      domain: "http:localhost:3000",
+      domain: import.meta.env.BETTER_AUTH_URL,
     }),
     adminClient() as unknown as BetterAuthClientPlugin
   ]

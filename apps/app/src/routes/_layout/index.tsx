@@ -1,20 +1,21 @@
-import { useLiveQuery } from "@tanstack/react-db";
-import { createFileRoute, Link } from "@tanstack/react-router";
-import { Activity, ArrowRight, ListTodo, Workflow } from "lucide-react";
-import { Badge } from "~/components/ui/badge";
+import {
+  createFileRoute,
+  Link,
+  useLoaderData,
+  ClientOnly,
+} from "@tanstack/react-router";
+import { ArrowRight, ListTodo, Workflow } from "lucide-react";
 import { Button } from "~/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "~/components/ui/card";
-import { workflowsCollection, queueJobsCollection } from "~/db/collections";
+import { Skeleton } from "~/components/ui/skeleton";
+import { RecentActivity } from "~/components/recent-activity";
 import { orpc } from "~/utils/orpc";
 
 export const Route = createFileRoute("/_layout/")({
   component: Dashboard,
   loader: async ({ context }) => {
-    // Preload data using orpc for initial load, collections will take over
     const [workflows, recentJobs] = await Promise.all([
-      context.queryClient.ensureQueryData(
-        orpc.workflows.getAll.queryOptions()
-      ),
+      context.queryClient.ensureQueryData(orpc.workflows.getAll.queryOptions()),
       context.queryClient.ensureQueryData(
         orpc.queues.getAllJobs.queryOptions()
       ),
@@ -25,21 +26,7 @@ export const Route = createFileRoute("/_layout/")({
 });
 
 function Dashboard() {
-  // Live queries that automatically update when data changes
-  const { data: workflows } = useLiveQuery((q) =>
-    q.from({ workflow: workflowsCollection })
-  );
-  
-  const { data: recentJobs } = useLiveQuery((q) =>
-    q.from({ job: queueJobsCollection })
-     .orderBy(({ job }) => job.timestamp, 'desc')
-  );
-
-  const workflowsLoading = false; // Live queries don't have loading states
-  const jobsLoading = false;
-
-  // Get only the first 5 recent jobs for display
-  const displayJobs = recentJobs?.slice(0, 5);
+  const { workflows, recentJobs } = useLoaderData({ from: Route.id });
 
   return (
     <div className="container mx-auto px-4 py-8 space-y-8">
@@ -66,9 +53,7 @@ function Dashboard() {
             </p>
             <div className="flex items-center justify-between">
               <div className="text-sm text-muted-foreground">
-                {workflowsLoading
-                  ? "Loading..."
-                  : `${workflows?.length || 0} workflows`}
+                {`${workflows?.data?.length || 0} workflows`}
               </div>
               <Button asChild variant="ghost" size="sm">
                 <Link to="/workflows">
@@ -92,9 +77,7 @@ function Dashboard() {
             </p>
             <div className="flex items-center justify-between">
               <div className="text-sm text-muted-foreground">
-                {jobsLoading
-                  ? "Loading..."
-                  : `${displayJobs?.length || 0} recent jobs`}
+                {`${recentJobs?.data?.items?.length || 0} recent jobs`}
               </div>
               <Button asChild variant="ghost" size="sm">
                 <Link to="/queues">
@@ -107,64 +90,7 @@ function Dashboard() {
       </div>
 
       {/* Recent Activity */}
-      <div className="space-y-4">
-        <div className="flex items-center justify-between">
-          <h2 className="text-xl font-semibold">Recent Activity</h2>
-          <Button asChild variant="outline" size="sm">
-            <Link to="/queues">View All Jobs</Link>
-          </Button>
-        </div>
-
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-lg">Recent Jobs</CardTitle>
-          </CardHeader>
-          <CardContent>
-            {jobsLoading ? (
-              <div className="text-center py-8 text-muted-foreground">
-                Loading recent activity...
-              </div>
-            ) : !displayJobs?.length ? (
-              <div className="text-center py-8 text-muted-foreground">
-                No recent activity found
-              </div>
-            ) : (
-              <div className="space-y-3">
-                {displayJobs.map((job: any) => (
-                  <div
-                    key={job.id}
-                    className="flex items-center justify-between py-2 border-b last:border-0"
-                  >
-                    <div className="flex items-center gap-3">
-                      <div className="font-mono text-xs text-muted-foreground">
-                        {job.id.slice(0, 8)}...
-                      </div>
-                      <div className="text-sm">{job.name}</div>
-                      {job.data.workflowId && (
-                        <Link
-                          to="/workflows/$workflowId"
-                          params={{ workflowId: job.data.workflowId }}
-                          className="text-xs text-primary hover:underline"
-                        >
-                          {job.data.workflowId.slice(0, 8)}...
-                        </Link>
-                      )}
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <div className="text-xs text-muted-foreground">
-                        {new Date(job.timestamp).toLocaleString()}
-                      </div>
-                      <Badge variant="outline" className="text-xs">
-                        {job.attemptsMade} attempts
-                      </Badge>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </CardContent>
-        </Card>
-      </div>
+      <RecentActivity />
     </div>
   );
 }

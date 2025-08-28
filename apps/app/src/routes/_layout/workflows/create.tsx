@@ -9,7 +9,7 @@ import { z } from "zod";
 import { JsonEditor } from "~/components/common/json-editor";
 import { Button } from "~/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "~/components/ui/tabs";
-import { workflowsCollection } from "~/db/collections";
+import { useCreateWorkflowMutation } from "~/lib/queries";
 
 export const Route = createFileRoute("/_layout/workflows/create")({
   component: CreateWorkflowPage,
@@ -23,6 +23,8 @@ function WorkflowCreate() {
   const navigate = useNavigate();
   const { user } = Route.useRouteContext(); // TODO: we should know that user is active
 
+  const createMutation = useCreateWorkflowMutation();
+
   const onSubmit = (data: z.infer<typeof createWorkflowSchema>) => {
     if (!data || !data.name) {
       toast.error("Please provide workflow data");
@@ -30,17 +32,19 @@ function WorkflowCreate() {
     }
 
     const newWorkflow = {
-      id: "...",
       createdBy: user.id,
-      user: user,
-      createdAt: new Date(),
       ...data,
     };
 
-    workflowsCollection.insert(newWorkflow);
-
-    toast.success("Workflow created successfully!");
-    navigate({ to: "/workflows" });
+    createMutation.mutate(newWorkflow, {
+      onSuccess: () => {
+        toast.success("Workflow created successfully!");
+        navigate({ to: "/workflows" });
+      },
+      onError: (error) => {
+        toast.error(`Failed to create workflow: ${error.message}`);
+      },
+    });
   };
 
   return (
